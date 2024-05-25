@@ -35,6 +35,8 @@ void erase(Net *net, Cell *erasor, Cell *to_erase);
 void print_net(Net *net);
 Cell *clone_cell(Cell *cell);
 Cell *suc_cell(Net *net);
+Cell *zero_cell(Net *net);
+Cell *sum_cell(Net *net);
 
 struct Port {
   bool is_principal;
@@ -61,7 +63,7 @@ struct Net {
   int cell_count;
 };
 
-Cell *dup_cell(Net *net, int num_aux);
+Cell *dup_cell(Net *net);
 Rule dup_rule();
 
 Cell *erasor_cell(Net *net);
@@ -69,44 +71,122 @@ Rule erase_rule();
 void add_cell_to_net(Net *net, Cell *cell);
 void delete_cell(Net *net, Cell *cell);
 
-Cell *dup_cell(Net *net, int num_aux) {
+Cell *dup_cell(Net *net) {
   Port *principal_port = create_port(true);
-  Cell *duplicator = create_cell(DUP, principal_port, NULL, 0);
-  add_cell_to_net(net, duplicator);
-  return duplicator;
+  Port *aux_ports[2];
+  aux_ports[0] = create_port(false);
+  aux_ports[1] = create_port(false);
+  Cell *dup = create_cell(SUM, principal_port, aux_ports, 2);
+  add_cell_to_net(net, dup);
+  return dup;
 }
 
-void duplicate(Net *net, Cell *duplicator, Cell *to_duplicate) {
-  if (duplicator->symbol != DUP || duplicator->deleted ||
-      to_duplicate->deleted) {
+Cell *mul_cell(Net *net) {
+  Port *principal_port = create_port(true);
+  Port *aux_ports[2];
+  aux_ports[0] = create_port(false);
+  aux_ports[1] = create_port(false);
+  Cell *dup = create_cell(MUL, principal_port, aux_ports, 2);
+  add_cell_to_net(net, dup);
+  return dup;
+}
+
+void mul_suc(Net *net, Cell *mul, Cell *suc) {
+  if (mul->symbol != MUL || suc->symbol != SUC || mul->deleted ||
+      suc->deleted) {
     return;
   }
-  // a duplicate rule does the following: we dup the to_dup cell,
-  // connect the N aux ports of the to_dup cell with N ports (exchainging) of
-  // the dup cells.
-  // therefore we need to clone the to_dup_cell
-  Cell *cloned = clone_cell(to_duplicate);
-  Cell *dup_1 = dup_cell(net, to_duplicate->aux_ports_length);
-  Cell *dup_2 = dup_cell(net, to_duplicate->aux_ports_length);
+  // this rule is a little more complex. We will end up with a mul port, a sum
+  // port and a dup port
+  // first, we connect mul princ port to suc aux port conn
+  // then we create a sum and a dup port
+  // connect the sum princ port to the 2 aux port of mul
+  // connect dup main port to whatever mul 1st aux port was connected to
+  // connect the dup 1 aux port to 1 aux port of mul
+  // connected the dup 2 aux port to 1 aux port of sum
+  // delete suc
+  connect(mul->principal_port, suc->auxiliary_ports[0]->connected_to);
+  Cell *sum = sum_cell(net);
+  Cell *dup = dup_cell(net);
 
-  for (int i = 0; i < to_duplicate->aux_ports_length; i++) {
-    Port *aux_1 = create_port(false);
-    Port *aux_2 = create_port(false);
-    dup_1->auxiliary_ports[i] = aux_1;
-    dup_2->auxiliary_ports[i] = aux_2;
-  }
+  connect(sum->auxiliary_ports[1], mul->auxiliary_ports[1]->connected_to);
+  connect(sum->principal_port, mul->auxiliary_ports[1]);
+  connect(dup->principal_port, mul->auxiliary_ports[0]->connected_to);
+  connect(mul->auxiliary_ports[0], dup->auxiliary_ports[0]);
+  connect(dup->auxiliary_ports[1], sum->auxiliary_ports[0]);
 
-  // cloned cell and create the dup ones, now we can apply the rule
-  // first dup cell aux port will connect with the first aux port of the dup
-  // cells
+  delete_cell(net, suc);
 }
 
-Rule dup_rule() {
-  Rule dup_r;
-  dup_r.s1 = DUP;
-  dup_r.s2 = NULL_S;
-  dup_r.reduce = duplicate;
-  return dup_r;
+void mul_zero(Net *net, Cell *mul, Cell *zero) {
+  if (mul->symbol != MUL || zero->symbol != ZERO || mul->deleted ||
+      zero->deleted) {
+    return;
+  }
+  // mul and zero interaction basically connects the first
+  // aux port of mul to an erasor and the second one to zero
+  Cell *erasor = erasor_cell(net);
+  connect(mul->auxiliary_ports[0]->connected_to, erasor->principal_port);
+  connect(mul->auxiliary_ports[1]->connected_to, zero->principal_port);
+  delete_cell(net, mul);
+  return;
+}
+
+void zero_erasor(Net *net, Cell *zero, Cell *erasor) {
+  if (zero->symbol != SUC || erasor->symbol != ERA || zero->deleted ||
+      erasor->deleted) {
+    return;
+  }
+  // simply delete both cells, nothing remains
+  delete_cell(net, zero);
+  delete_cell(net, erasor);
+}
+
+void suc_erasor(Net *net, Cell *suc, Cell *erasor) {
+  if (suc->symbol != SUC || erasor->symbol != ERA || suc->deleted ||
+      erasor->deleted) {
+    return;
+  }
+
+  // erase a suc simply deletes the suc cell and connects the erasor to whatever
+  // suc aux port was connected to
+  connect(erasor->principal_port, suc->auxiliary_ports[0]->connected_to);
+  delete_cell(net, suc);
+}
+
+void zero_dup(Net *net, Cell *zero, Cell *dup) {
+  if (zero->symbol != ZERO || dup->symbol != DUP || zero->deleted ||
+      dup->deleted) {
+    return;
+  }
+  // zero main to dup main should clone 0 and connect it both
+  // to whatever was connected to dup aux nodes
+  Cell *new_zero = zero_cell(net);
+  connect(zero->principal_port, dup->auxiliary_ports[0]->connected_to);
+  connect(new_zero->principal_port, dup->auxiliary_ports[1]->connected_to);
+  delete_cell(net, dup);
+  return;
+}
+
+void suc_dup(Net *net, Cell *suc, Cell *dup) {
+  if (suc->symbol != SUC || dup->symbol != DUP || suc->deleted ||
+      dup->deleted) {
+    return;
+  }
+  // if a suc main port connects to a dup main port, simply return
+  // two sucs with main ports connected to the aux ports of dup
+  // therefore we create a new suc and connect the old one
+  Cell *new_suc = suc_cell(net);
+  // connect dup principal port with suc aux conn
+  connect(dup->principal_port, suc->auxiliary_ports[0]->connected_to);
+  // conn suc principal_port to dup aux conn
+  connect(suc->principal_port, dup->auxiliary_ports[0]->connected_to);
+  connect(new_suc->principal_port, dup->auxiliary_ports[1]->connected_to);
+
+  // connect suc and new suc aux ports with dup aux ports
+  connect(suc->auxiliary_ports[0], dup->auxiliary_ports[0]);
+  connect(new_suc->auxiliary_ports[0], dup->auxiliary_ports[1]);
+  return;
 }
 
 Cell *erasor_cell(Net *net) {
@@ -148,6 +228,27 @@ void suc_sum(Net *net, Cell *suc, Cell *sum) {
 
   // now simply delete the old suc
   delete_cell(net, suc);
+}
+
+void zero_sum(Net *net, Cell *zero, Cell *sum) {
+  if (zero->symbol != ZERO || sum->symbol != SUM || zero->deleted ||
+      sum->deleted) {
+    return;
+  }
+  // for this rule, we simply connect whatever is connected to 1st aux
+  // port of the sum rule to whatever in the 2nd aux
+  connect(sum->auxiliary_ports[0]->connected_to,
+          sum->auxiliary_ports[1]->connected_to);
+  // and delete both + and 0
+  delete_cell(net, zero);
+  delete_cell(net, sum);
+}
+
+Cell *zero_cell(Net *net) {
+  Port *principal_port = create_port(0);
+  Cell *zero = create_cell(ZERO, principal_port, NULL, 0);
+  add_cell_to_net(net, zero);
+  return zero;
 }
 
 Cell *sum_cell(Net *net) {
