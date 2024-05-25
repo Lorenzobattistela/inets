@@ -1,75 +1,15 @@
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "cell.h"
 
-#define MAX_AUX_PORTS 5
-#define MAX_PORTS 10
-#define MAX_CONNECTIONS 20
 
-typedef struct Port Port;
-typedef struct Cell Cell;
-typedef struct Rule Rule;
-typedef struct Net Net;
-typedef void (*FunctionPtr)(Net *, Cell *, Cell *);
+bool check_mul_zero(Connection *c) {
 
-typedef enum {
-  ERA, // erasor
-  DUP,
-  SUC,
-  ZERO,
-  SUM,
-  MUL,
-  ANY,
-  NULL_S,
-} Symbol;
 
-void pprint_symbol(Symbol s);
-Port *create_port(bool is_principal);
-void print_port(Port *p);
-Cell *create_cell(Symbol symbol, Port *principal_port, Port *auxiliary_ports[],
-                  int aux_length);
-void print_cell(Cell *cell);
-void connect(Port *p, Port *q);
-void erase(Net *net, Cell *erasor, Cell *to_erase);
-void print_net(Net *net);
-Cell *clone_cell(Cell *cell);
-Cell *suc_cell(Net *net);
-Cell *zero_cell(Net *net);
-Cell *sum_cell(Net *net);
 
-struct Port {
-  bool is_principal;
-  Port *connected_to;
-  int connections;
-};
 
-struct Cell {
-  Symbol symbol;
-  Port *auxiliary_ports[MAX_AUX_PORTS];
-  int aux_ports_length;
-  Port *principal_port;
-  bool deleted;
-};
 
-struct Rule {
-  Symbol s1;
-  Symbol s2;
-  FunctionPtr reduce;
-};
 
-struct Net {
-  Cell *cells[MAX_CONNECTIONS];
-  int cell_count;
-};
 
-Cell *dup_cell(Net *net);
-Rule dup_rule();
 
-Cell *erasor_cell(Net *net);
-Rule erase_rule();
-void add_cell_to_net(Net *net, Cell *cell);
-void delete_cell(Net *net, Cell *cell);
 
 Cell *dup_cell(Net *net) {
   Port *principal_port = create_port(true);
