@@ -115,7 +115,6 @@ Rule do_nothing_rule(Connection *c) {
 void do_nothing(Net *net, Cell *a, Cell *b) { return; }
 
 Rule match_with_rule(Connection *c) {
-  printf("Connection cell symbol:\n");
   if (check_mul_suc(c)) {
     return mul_suc_rule(c);
   } else if (check_mul_zero(c)) {
@@ -138,10 +137,8 @@ Rule match_with_rule(Connection *c) {
 
 // this should probably be parallelizable
 Rule find_reducible(Net *net) {
-  printf("%i\n", net->connection_count);
   for (int i = 0; i < net->connection_count; i++) {
     Connection *conn = net->connections[i];
-    printf("Is conn null? %i\n", conn == NULL);
     Rule r = match_with_rule(conn);
     if (r.reducible) {
       return r;
@@ -160,7 +157,7 @@ Cell *suc_cell(Net *net) {
 }
 
 Cell *zero_cell(Net *net) {
-  Port *principal_port = create_port(0);
+  Port *principal_port = create_port(true);
   Cell *zero = create_cell(ZERO, principal_port, NULL, 0);
   add_cell_to_net(net, zero);
   return zero;
@@ -363,7 +360,7 @@ void print_cell(Cell *cell) {
     printf("DELETED CELL!\n");
     return;
   }
-  printf("Symbol: %i\n", cell->symbol);
+  printf("Symbol: ");
   pprint_symbol(cell->symbol);
   printf("Cell principal_port\n");
   print_port(cell->principal_port);
@@ -378,9 +375,6 @@ void print_cell(Cell *cell) {
 
 void print_rule(Rule *rule) {
   printf("Rule connection:\n");
-  printf("Is rule c null? %i\n", rule->c == NULL);
-  printf("Is c->a null? %i\n", rule->c->a == NULL);
-  printf("Is c->b null? %i\n", rule->c->b == NULL);
   pprint_symbol(rule->c->a->symbol);
   pprint_symbol(rule->c->b->symbol);
 }
@@ -389,11 +383,14 @@ int main() {
   Net net = create_net();
   Cell *z = zero_cell(&net);
   Cell *s = suc_cell(&net);
+  // suc(0)
   connect(z->principal_port, s->auxiliary_ports[0]);
 
   Cell *z_1 = zero_cell(&net);
   Cell *sum_c = sum_cell(&net);
+  // y = 0
   connect(z_1->principal_port, sum_c->auxiliary_ports[0]);
+  // x = suc(0)
   connect(s->principal_port, sum_c->principal_port);
   Connection conn;
   conn.a = s;
@@ -402,7 +399,7 @@ int main() {
   net.connection_count++;
   // print_net(&net);
   Rule r = find_reducible(&net);
-  print_rule(&r);
+  // print_rule(&r);
   r.reduce(&net, r.c->a, r.c->b);
   print_net(&net);
 }
