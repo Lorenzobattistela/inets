@@ -480,4 +480,10 @@ int main() {
   print_rule(&r2);
   r2.reduce(&net, r2.c->a, r2.c->b, r2.c);
   print_net(&net);
+
+  update_connections(&net);
+
+  Rule r3 = find_reducible(&net);
+  printf("Is r3 a non reducible null rull (halted?) %i\n",
+         r3.reducible == false);
 }
