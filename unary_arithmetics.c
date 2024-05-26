@@ -1,6 +1,6 @@
 #include "unary_arithmetics.h"
 
-void mul_suc(Net *net, Cell *mul, Cell *suc) {
+void mul_suc(Net *net, Cell *mul, Cell *suc, Connection *conn) {
   if (mul->symbol != MUL || suc->symbol != SUC || mul->deleted ||
       suc->deleted) {
     return;
@@ -25,9 +25,11 @@ void mul_suc(Net *net, Cell *mul, Cell *suc) {
   connect(dup->auxiliary_ports[1], sum->auxiliary_ports[0]);
 
   delete_cell(net, suc);
+
+  conn->used = true;
 }
 
-void mul_zero(Net *net, Cell *mul, Cell *zero) {
+void mul_zero(Net *net, Cell *mul, Cell *zero, Connection *conn) {
   if (mul->symbol != MUL || zero->symbol != ZERO || mul->deleted ||
       zero->deleted) {
     return;
@@ -38,10 +40,12 @@ void mul_zero(Net *net, Cell *mul, Cell *zero) {
   connect(mul->auxiliary_ports[0]->connected_to, erasor->principal_port);
   connect(mul->auxiliary_ports[1]->connected_to, zero->principal_port);
   delete_cell(net, mul);
+
+  conn->used = true;
   return;
 }
 
-void zero_erasor(Net *net, Cell *zero, Cell *erasor) {
+void zero_erasor(Net *net, Cell *zero, Cell *erasor, Connection *conn) {
   if (zero->symbol != SUC || erasor->symbol != ERA || zero->deleted ||
       erasor->deleted) {
     return;
@@ -49,9 +53,11 @@ void zero_erasor(Net *net, Cell *zero, Cell *erasor) {
   // simply delete both cells, nothing remains
   delete_cell(net, zero);
   delete_cell(net, erasor);
+
+  conn->used = true;
 }
 
-void suc_erasor(Net *net, Cell *suc, Cell *erasor) {
+void suc_erasor(Net *net, Cell *suc, Cell *erasor, Connection *conn) {
   if (suc->symbol != SUC || erasor->symbol != ERA || suc->deleted ||
       erasor->deleted) {
     return;
@@ -61,9 +67,11 @@ void suc_erasor(Net *net, Cell *suc, Cell *erasor) {
   // suc aux port was connected to
   connect(erasor->principal_port, suc->auxiliary_ports[0]->connected_to);
   delete_cell(net, suc);
+
+  conn->used = true;
 }
 
-void zero_dup(Net *net, Cell *zero, Cell *dup) {
+void zero_dup(Net *net, Cell *zero, Cell *dup, Connection *conn) {
   if (zero->symbol != ZERO || dup->symbol != DUP || zero->deleted ||
       dup->deleted) {
     return;
@@ -74,10 +82,12 @@ void zero_dup(Net *net, Cell *zero, Cell *dup) {
   connect(zero->principal_port, dup->auxiliary_ports[0]->connected_to);
   connect(new_zero->principal_port, dup->auxiliary_ports[1]->connected_to);
   delete_cell(net, dup);
+
+  conn->used = true;
   return;
 }
 
-void suc_dup(Net *net, Cell *suc, Cell *dup) {
+void suc_dup(Net *net, Cell *suc, Cell *dup, Connection *conn) {
   if (suc->symbol != SUC || dup->symbol != DUP || suc->deleted ||
       dup->deleted) {
     return;
@@ -95,10 +105,12 @@ void suc_dup(Net *net, Cell *suc, Cell *dup) {
   // connect suc and new suc aux ports with dup aux ports
   connect(suc->auxiliary_ports[0], dup->auxiliary_ports[0]);
   connect(new_suc->auxiliary_ports[0], dup->auxiliary_ports[1]);
+
+  conn->used = true;
   return;
 }
 
-void suc_sum(Net *net, Cell *suc, Cell *sum) {
+void suc_sum(Net *net, Cell *suc, Cell *sum, Connection *conn) {
   if (suc->symbol != SUC || sum->symbol != SUM || suc->deleted ||
       sum->deleted) {
     return;
@@ -117,9 +129,12 @@ void suc_sum(Net *net, Cell *suc, Cell *sum) {
 
   // now simply delete the old suc
   delete_cell(net, suc);
+
+  // finally remove the connection from the array (maybe marking as used)
+  conn->used = true;
 }
 
-void zero_sum(Net *net, Cell *zero, Cell *sum) {
+void zero_sum(Net *net, Cell *zero, Cell *sum, Connection *conn) {
   if (zero->symbol != ZERO || sum->symbol != SUM || zero->deleted ||
       sum->deleted) {
     return;
@@ -131,4 +146,6 @@ void zero_sum(Net *net, Cell *zero, Cell *sum) {
   // and delete both + and 0
   delete_cell(net, zero);
   delete_cell(net, sum);
+
+  conn->used = true;
 }
