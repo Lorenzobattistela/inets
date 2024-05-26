@@ -33,7 +33,7 @@ struct Port {
 
 struct Cell {
   Symbol symbol;
-  Port *auxiliary_ports[MAX_AUX_PORTS];
+  Port **auxiliary_ports;
   int aux_ports_length;
   Port *principal_port;
   bool deleted;
@@ -52,9 +52,9 @@ struct Connection {
 };
 
 struct Net {
-  Cell *cells[MAX_CONNECTIONS];
+  Cell **cells;
   int cell_count;
-  Connection *connections[MAX_CONNECTIONS];
+  Connection **connections;
   int connection_count;
 };
 

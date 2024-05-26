@@ -305,13 +305,14 @@ Port *create_port(bool is_principal) {
   return port;
 }
 
-Cell *create_cell(Symbol symbol, Port *principal_port, Port *auxiliary_ports[],
+Cell *create_cell(Symbol symbol, Port *principal_port, Port **auxiliary_ports,
                   int aux_length) {
   Cell *c = (Cell *)malloc(sizeof(Cell));
   c->symbol = symbol;
   c->principal_port = principal_port;
   c->aux_ports_length = aux_length;
   c->deleted = false;
+  c->auxiliary_ports = (Port **)malloc(aux_length * sizeof(Port *));
   for (int i = 0; i < aux_length; i++) {
     c->auxiliary_ports[i] = auxiliary_ports[i];
   }
@@ -322,6 +323,8 @@ Net create_net() {
   Net n;
   n.connection_count = 0;
   n.cell_count = 0;
+  n.cells = (Cell **)malloc(MAX_CONNECTIONS * sizeof(Cell *));
+  n.connections = (Connection **)malloc(MAX_CONNECTIONS * sizeof(Connection *));
   return n;
 }
 
@@ -467,15 +470,9 @@ int main() {
   Rule r = find_reducible(&net);
   // print_rule(&r);
   r.reduce(&net, r.c->a, r.c->b, &conn);
-  // print_net(&net);
+  print_net(&net);
   update_connections(&net);
-  for (int j = 0; j < net.connection_count; j++) {
-    Connection *c = net.connections[j];
-    printf("IS C NULL? %i\n", c == NULL);
-    if (!c->used) {
-      print_connection(c);
-    }
-  }
+
   Rule r2 = find_reducible(&net);
   print_rule(&r2);
   r2.reduce(&net, r2.c->a, r2.c->b, r2.c);
