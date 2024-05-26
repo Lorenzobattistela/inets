@@ -12,7 +12,7 @@ typedef struct Cell Cell;
 typedef struct Rule Rule;
 typedef struct Net Net;
 typedef struct Connection Connection;
-typedef void (*FunctionPtr)(Net *, Cell *, Cell *);
+typedef void (*FunctionPtr)(Net *, Cell *, Cell *, Connection *);
 
 typedef enum {
   ERA,  // erasor
@@ -48,6 +48,7 @@ struct Rule {
 struct Connection {
   Cell *a;
   Cell *b;
+  bool used;
 };
 
 struct Net {
@@ -87,12 +88,12 @@ void print_cell(Cell *cell);
 Rule dup_rule();
 Rule erase_rule();
 
-void mul_suc(Net *net, Cell *mul, Cell *suc);
-void mul_zero(Net *net, Cell *mul, Cell *zero);
-void zero_erasor(Net *net, Cell *zero, Cell *erasor);
-void suc_erasor(Net *net, Cell *suc, Cell *erasor);
-void zero_dup(Net *net, Cell *zero, Cell *dup);
-void suc_dup(Net *net, Cell *suc, Cell *dup);
-void suc_sum(Net *net, Cell *suc, Cell *sum);
-void zero_sum(Net *net, Cell *zero, Cell *sum);
-void do_nothing(Net *net, Cell *a, Cell *b);
+void mul_suc(Net *net, Cell *mul, Cell *suc, Connection *conn);
+void mul_zero(Net *net, Cell *mul, Cell *zero, Connection *conn);
+void zero_erasor(Net *net, Cell *zero, Cell *erasor, Connection *conn);
+void suc_erasor(Net *net, Cell *suc, Cell *erasor, Connection *conn);
+void zero_dup(Net *net, Cell *zero, Cell *dup, Connection *conn);
+void suc_dup(Net *net, Cell *suc, Cell *dup, Connection *conn);
+void suc_sum(Net *net, Cell *suc, Cell *sum, Connection *conn);
+void zero_sum(Net *net, Cell *zero, Cell *sum, Connection *conn);
+void do_nothing(Net *net, Cell *a, Cell *b, Connection *conn);

@@ -1,4 +1,5 @@
 #include "cell.h"
+#include <stdio.h>
 
 bool check_mul_suc(Connection *c) {
   return (c->a->symbol == MUL && c->b->symbol == SUC) &&
@@ -112,7 +113,7 @@ Rule do_nothing_rule(Connection *c) {
   return rule;
 }
 
-void do_nothing(Net *net, Cell *a, Cell *b) { return; }
+void do_nothing(Net *net, Cell *a, Cell *b, Connection *conn) { return; }
 
 Rule match_with_rule(Connection *c) {
   if (check_mul_suc(c)) {
@@ -135,15 +136,71 @@ Rule match_with_rule(Connection *c) {
   return do_nothing_rule(c);
 }
 
+void update_connections(Net *net) {
+  for (int i = 0; i < net->cell_count; ++i) {
+    Cell *cell_a = net->cells[i];
+    if (cell_a->deleted || cell_a->principal_port == NULL ||
+        !cell_a->principal_port->is_principal) {
+      continue;
+    }
+
+    Port *port_a = cell_a->principal_port->connected_to;
+    if (port_a == NULL || !port_a->is_principal) {
+      continue;
+    }
+
+    for (int j = 0; j < net->cell_count; ++j) {
+      if (i == j)
+        continue;
+      Cell *cell_b = net->cells[j];
+      if (cell_b->deleted || cell_b->principal_port == NULL) {
+        continue;
+      }
+
+      if (cell_b->principal_port == port_a) {
+        bool exists = false;
+        for (int k = 0; k < net->connection_count; ++k) {
+          Connection *conn = net->connections[k];
+          if ((conn->a == cell_a && conn->b == cell_b) ||
+              (conn->a == cell_b && conn->b == cell_a)) {
+            exists = true;
+            break;
+          }
+        }
+
+        if (!exists && net->connection_count < MAX_CONNECTIONS) {
+          Connection *new_conn = (Connection *)malloc(sizeof(Connection));
+          if (new_conn != NULL) {
+            new_conn->a = cell_a;
+            new_conn->b = cell_b;
+            new_conn->used = false;
+            net->connections[net->connection_count++] = new_conn;
+          } else {
+          }
+        }
+        break;
+      }
+    }
+  }
+}
+
 // this should probably be parallelizable
 Rule find_reducible(Net *net) {
   for (int i = 0; i < net->connection_count; i++) {
     Connection *conn = net->connections[i];
+    if (conn->used) {
+      continue;
+    }
     Rule r = match_with_rule(conn);
     if (r.reducible) {
       return r;
     }
   }
+  Rule null;
+  null.c = NULL;
+  null.reduce = do_nothing;
+  null.reducible = false;
+  return null;
 }
 
 // ============== Specific Cell creation functions ================
@@ -379,6 +436,14 @@ void print_rule(Rule *rule) {
   pprint_symbol(rule->c->b->symbol);
 }
 
+void print_connection(Connection *connection) {
+  printf("Connection:");
+  printf("A cell:");
+  print_cell(connection->a);
+  printf("B cell:");
+  print_cell(connection->b);
+}
+
 int main() {
   Net net = create_net();
   Cell *z = zero_cell(&net);
@@ -395,11 +460,24 @@ int main() {
   Connection conn;
   conn.a = s;
   conn.b = sum_c;
+  conn.used = false;
   net.connections[net.connection_count] = &conn;
   net.connection_count++;
   // print_net(&net);
   Rule r = find_reducible(&net);
   // print_rule(&r);
-  r.reduce(&net, r.c->a, r.c->b);
+  r.reduce(&net, r.c->a, r.c->b, &conn);
+  // print_net(&net);
+  update_connections(&net);
+  for (int j = 0; j < net.connection_count; j++) {
+    Connection *c = net.connections[j];
+    printf("IS C NULL? %i\n", c == NULL);
+    if (!c->used) {
+      print_connection(c);
+    }
+  }
+  Rule r2 = find_reducible(&net);
+  print_rule(&r2);
+  r2.reduce(&net, r2.c->a, r2.c->b, r2.c);
   print_net(&net);
 }
