@@ -6,37 +6,37 @@ bool check_mul_suc(Connection *c) {
 }
 
 bool check_mul_zero(Connection *c) {
-  return (c->a->symbol == MUL && c->b->symbol == ZERO) &&
+  return (c->a->symbol == MUL && c->b->symbol == ZERO) ||
          (c->a->symbol == ZERO && c->b->symbol == MUL);
 }
 
 bool check_zero_erasor(Connection *c) {
-  return (c->a->symbol == ZERO && c->b->symbol == ERA) &&
+  return (c->a->symbol == ZERO && c->b->symbol == ERA) ||
          (c->a->symbol == ERA && c->b->symbol == ZERO);
 }
 
 bool check_suc_erasor(Connection *c) {
-  return (c->a->symbol == SUC && c->b->symbol == ERA) &&
+  return (c->a->symbol == SUC && c->b->symbol == ERA) ||
          (c->a->symbol == ERA && c->b->symbol == SUC);
 }
 
 bool check_zero_dup(Connection *c) {
-  return (c->a->symbol == ZERO && c->b->symbol == DUP) &&
+  return (c->a->symbol == ZERO && c->b->symbol == DUP) ||
          (c->a->symbol == DUP && c->b->symbol == ZERO);
 }
 
 bool check_suc_dup(Connection *c) {
-  return (c->a->symbol == SUC && c->b->symbol == DUP) &&
+  return (c->a->symbol == SUC && c->b->symbol == DUP) ||
          (c->a->symbol == DUP && c->b->symbol == SUC);
 }
 
 bool check_suc_sum(Connection *c) {
-  return (c->a->symbol == SUC && c->b->symbol == SUM) &&
+  return (c->a->symbol == SUC && c->b->symbol == SUM) ||
          (c->a->symbol == SUM && c->b->symbol == SUC);
 }
 
 bool check_zero_sum(Connection *c) {
-  return (c->a->symbol == ZERO && c->b->symbol == SUM) &&
+  return (c->a->symbol == ZERO && c->b->symbol == SUM) ||
          (c->a->symbol == SUM && c->b->symbol == ZERO);
 }
 
@@ -67,7 +67,7 @@ Rule zero_erasor_rule(Connection *c) {
 Rule suc_erasor_rule(Connection *c) {
   Rule rule;
   rule.c = c;
-  rule.reduce = zero_erasor;
+  rule.reduce = suc_erasor;
   rule.reducible = true;
   return rule;
 }
@@ -91,7 +91,7 @@ Rule suc_dup_rule(Connection *c) {
 Rule suc_sum_rule(Connection *c) {
   Rule rule;
   rule.c = c;
-  rule.reduce = suc_dup;
+  rule.reduce = suc_sum;
   rule.reducible = true;
   return rule;
 }
@@ -99,7 +99,7 @@ Rule suc_sum_rule(Connection *c) {
 Rule zero_sum_rule(Connection *c) {
   Rule rule;
   rule.c = c;
-  rule.reduce = suc_dup;
+  rule.reduce = zero_sum;
   rule.reducible = true;
   return rule;
 }
@@ -115,6 +115,7 @@ Rule do_nothing_rule(Connection *c) {
 void do_nothing(Net *net, Cell *a, Cell *b) { return; }
 
 Rule match_with_rule(Connection *c) {
+  printf("Connection cell symbol:\n");
   if (check_mul_suc(c)) {
     return mul_suc_rule(c);
   } else if (check_mul_zero(c)) {
@@ -137,8 +138,10 @@ Rule match_with_rule(Connection *c) {
 
 // this should probably be parallelizable
 Rule find_reducible(Net *net) {
+  printf("%i\n", net->connection_count);
   for (int i = 0; i < net->connection_count; i++) {
     Connection *conn = net->connections[i];
+    printf("Is conn null? %i\n", conn == NULL);
     Rule r = match_with_rule(conn);
     if (r.reducible) {
       return r;
@@ -261,6 +264,13 @@ Cell *create_cell(Symbol symbol, Port *principal_port, Port *auxiliary_ports[],
   return c;
 }
 
+Net create_net() {
+  Net n;
+  n.connection_count = 0;
+  n.cell_count = 0;
+  return n;
+}
+
 void connect(Port *p, Port *q) {
   if (p == NULL || q == NULL) {
     return;
@@ -297,13 +307,14 @@ void delete_cell(Net *net, Cell *cell) {
     for (int i = 0; i < cell->aux_ports_length; i++) {
       free(cell->auxiliary_ports[i]);
     }
-    free(cell);
   }
 }
 
 // ========================= Pretty printing functions ==============
 void print_net(Net *net) {
   for (int i = 0; i < net->cell_count; i++) {
+    printf("Checking deleted cell: i=%i, is deleted: %i\n", i,
+           net->cells[i]->deleted);
     if (!net->cells[i]->deleted) {
       printf("Cell %d:\n", i);
       print_cell(net->cells[i]);
@@ -325,6 +336,21 @@ void pprint_symbol(Symbol s) {
   case ERA:
     printf("ERASER");
     break;
+  case DUP:
+    printf("DUPLICATOR");
+    break;
+  case SUC:
+    printf("SUCCESSOR");
+    break;
+  case ZERO:
+    printf("ZERO");
+    break;
+  case SUM:
+    printf("SUM");
+    break;
+  case MUL:
+    printf("MUL");
+    break;
   case ANY:
     printf("ANY");
     break;
@@ -335,6 +361,11 @@ void pprint_symbol(Symbol s) {
 }
 
 void print_cell(Cell *cell) {
+  if (cell->deleted) {
+    printf("DELETED CELL!\n");
+    return;
+  }
+  printf("Symbol: %i\n", cell->symbol);
   pprint_symbol(cell->symbol);
   printf("Cell principal_port\n");
   print_port(cell->principal_port);
@@ -347,4 +378,33 @@ void print_cell(Cell *cell) {
   }
 }
 
-int main() { return 0; }
+void print_rule(Rule *rule) {
+  printf("Rule connection:\n");
+  printf("Is rule c null? %i\n", rule->c == NULL);
+  printf("Is c->a null? %i\n", rule->c->a == NULL);
+  printf("Is c->b null? %i\n", rule->c->b == NULL);
+  pprint_symbol(rule->c->a->symbol);
+  pprint_symbol(rule->c->b->symbol);
+}
+
+int main() {
+  Net net = create_net();
+  Cell *z = zero_cell(&net);
+  Cell *s = suc_cell(&net);
+  connect(z->principal_port, s->auxiliary_ports[0]);
+
+  Cell *z_1 = zero_cell(&net);
+  Cell *sum_c = sum_cell(&net);
+  connect(z_1->principal_port, sum_c->auxiliary_ports[0]);
+  connect(s->principal_port, sum_c->principal_port);
+  Connection conn;
+  conn.a = s;
+  conn.b = sum_c;
+  net.connections[net.connection_count] = &conn;
+  net.connection_count++;
+  // print_net(&net);
+  Rule r = find_reducible(&net);
+  print_rule(&r);
+  r.reduce(&net, r.c->a, r.c->b);
+  print_net(&net);
+}
