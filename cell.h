@@ -69,15 +69,28 @@ Cell *sum_cell(Net *net);
 Cell *erasor_cell(Net *net);
 Cell *mul_cell(Net *net);
 
+Cell *suc_cell_c(Net *net);
+Cell *zero_cell_c(Net *net);
+Cell *dup_cell_c(Net *net);
+Cell *sum_cell_c(Net *net);
+Cell *erasor_cell_c(Net *net);
+Cell *mul_cell_c(Net *net);
+
 // Cell interactions fns
 Cell *clone_cell(Cell *cell);
 Port *create_port(bool is_principal);
+Port *create_port_c(bool is_principal);
 Cell *create_cell(Symbol symbol, Port *principal_port, Port *auxiliary_ports[],
                   int aux_length);
+Cell *create_cell_c(Symbol symbol, Port *principal_port, Port *auxiliary_ports[],
+                  int aux_length);
 void connect(Port *p, Port *q);
+void connect_c(Port *p, Port *q);
 void erase(Net *net, Cell *erasor, Cell *to_erase);
 void add_cell_to_net(Net *net, Cell *cell);
+void add_cell_to_net_c(Net *net, Cell *cell);
 void delete_cell(Net *net, Cell *cell);
+void delete_cell_c(Net *net, Cell *cell);
 
 // pretty printing functions
 void print_net(Net *net);
