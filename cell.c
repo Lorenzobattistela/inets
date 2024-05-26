@@ -313,8 +313,6 @@ void delete_cell(Net *net, Cell *cell) {
 // ========================= Pretty printing functions ==============
 void print_net(Net *net) {
   for (int i = 0; i < net->cell_count; i++) {
-    printf("Checking deleted cell: i=%i, is deleted: %i\n", i,
-           net->cells[i]->deleted);
     if (!net->cells[i]->deleted) {
       printf("Cell %d:\n", i);
       print_cell(net->cells[i]);
