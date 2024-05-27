@@ -177,7 +177,6 @@ void update_connections(Net *net) {
             new_conn->b = cell_b;
             new_conn->used = false;
             net->connections[net->connection_count++] = new_conn;
-          } else {
           }
         }
         break;
@@ -187,22 +186,23 @@ void update_connections(Net *net) {
 }
 
 // this should probably be parallelizable
-Rule find_reducible(Net *net) {
+Rule *find_reducible(Net *net) {
   for (int i = 0; i < net->connection_count; i++) {
     Connection *conn = net->connections[i];
     if (conn->used) {
+      printf("I got here!\n");
       continue;
     }
     Rule r = match_with_rule(conn);
     if (r.reducible) {
-      return r;
+      Rule *ret = malloc(sizeof(Rule));
+      ret->reducible = true;
+      ret->reduce = r.reduce;
+      ret->c = r.c;
+      return ret;
     }
   }
-  Rule null;
-  null.c = NULL;
-  null.reduce = do_nothing;
-  null.reducible = false;
-  return null;
+  return NULL;
 }
 
 // ============== Specific Cell creation functions ================
@@ -321,6 +321,19 @@ Cell *create_cell(Symbol symbol, Port *principal_port, Port **auxiliary_ports,
   return c;
 }
 
+Connection *create_connection(Cell *a, Cell *b) {
+  Connection *c = (Connection *)malloc(sizeof(Connection));
+  if (c == NULL) {
+    fprintf(stderr, "Failed to allocate memory for Connection\n");
+    exit(EXIT_FAILURE);
+  }
+
+  c->used = false;
+  c->a = a;
+  c->b = b;
+  return c;
+}
+
 Net create_net() {
   Net n;
   n.connection_count = 0;
@@ -331,15 +344,12 @@ Net create_net() {
 }
 
 Net *create_net_p() {
-  // Allocate memory for the Net structure
   Net *n = (Net *)malloc(sizeof(Net));
   if (n == NULL) {
-    // Handle memory allocation failure
     fprintf(stderr, "Failed to allocate memory for Net\n");
     exit(EXIT_FAILURE);
   }
 
-  // Initialize the fields of the Net structure
   n->connection_count = 0;
   n->cell_count = 0;
   n->cells = (Cell **)malloc(MAX_CONNECTIONS * sizeof(Cell *));
@@ -503,6 +513,43 @@ Port *find_free_port(Net *n) {
   return NULL;
 }
 
+Cell *find_zero(Net *n) {
+  for (int i = 0; i < n->cell_count; i++) {
+    Cell *c = n->cells[i];
+    if (c->symbol == ZERO && !c->deleted) {
+      return c;
+    }
+  }
+  return NULL;
+}
+
+Cell *find_cell_by_port(Net *n, Port *port) {
+  for (int i = 0; i < n->cell_count; i++) {
+    Cell *c = n->cells[i];
+    if (c == NULL) {
+      continue;
+    }
+    print_cell(c);
+
+    Port *p = c->principal_port;
+    if (p == NULL) {
+      continue;
+    } else if (p == port) {
+      return c;
+    }
+
+    for (int j = 0; j < c->aux_ports_length; j++) {
+      Port *aux = c->auxiliary_ports[j];
+      if (aux == NULL) {
+        break;
+      } else if (aux == port) {
+        return c;
+      }
+    }
+  }
+  return NULL;
+}
+
 Net *sum_net(Net *right, Net *left, Port *r_free, Port *l_free) {
   // right and left are both nets, we need to merge them into one net that has
   // all the sum. We already know the free ports.
@@ -533,6 +580,31 @@ Net *sum_net(Net *right, Net *left, Port *r_free, Port *l_free) {
   return sum;
 }
 
+int church_decode(Net *n) {
+  Cell *c = find_zero(n);
+  if (c == NULL) {
+    fprintf(stderr, "Not a church encoded int!");
+    exit(EXIT_FAILURE);
+  }
+  int val = 0;
+
+  Port *p = c->principal_port;
+  print_port(p);
+
+  while (p->connected_to != NULL) {
+    p = p->connected_to;
+    c = find_cell_by_port(n, p);
+    if (c == NULL) {
+      fprintf(stderr, "Not a church encoded int!");
+      exit(EXIT_FAILURE);
+    }
+    p = c->principal_port;
+    val++;
+  }
+
+  return val;
+}
+
 Net *church_encode(int value) {
   Net *n = create_net_p();
   Cell *zero = zero_cell(n);
@@ -551,7 +623,6 @@ Net *to_net(ASTNode *node) {
   if (node == NULL)
     return NULL;
 
-  print_token(node->token);
   if (node->token == PLUS) {
     Net *right = to_net(node->right);
     Port *r_free = find_free_port(right);
@@ -570,7 +641,6 @@ Net *to_net(ASTNode *node) {
     Net *sum = sum_net(right, left, r_free, l_free);
     return sum;
   } else if (node->token == DIGIT) {
-    printf("Digit value is: %i\n", node->value);
     Net *digit = church_encode(node->value);
     return digit;
   }
@@ -578,10 +648,22 @@ Net *to_net(ASTNode *node) {
 }
 
 int main() {
-  const char *in = "((3 + 4) + (2 + 3))";
+  const char *in = "(2 + 2)";
   ASTNode *ast = parse(in);
   Net *parsed = to_net(ast);
-  print_net(parsed);
+  update_connections(parsed);
+
+  Rule *r;
+  while ((r = find_reducible(parsed)) != NULL) {
+    r->reduce(parsed, r->c->a, r->c->b, r->c);
+    update_connections(parsed);
+  }
+
+  //  print_net(parsed);
+
+  int v = church_decode(parsed);
+
+  printf("Decoding church result: %i\n", v);
   free_net(parsed);
   // int v = 0;
   // Net *n = church_encode(v);

@@ -59,7 +59,7 @@ struct Net {
 };
 
 Rule match_with_rule(Connection *c);
-Rule find_reducible(Net *net);
+Rule *find_reducible(Net *net);
 
 // specific cell creating functions
 Cell *suc_cell(Net *net);
