@@ -1,5 +1,7 @@
 #include "cell.h"
+#include "parser.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 bool check_mul_suc(Connection *c) {
   return (c->a->symbol == MUL && c->b->symbol == SUC) &&
@@ -328,6 +330,46 @@ Net create_net() {
   return n;
 }
 
+Net *create_net_p() {
+  // Allocate memory for the Net structure
+  Net *n = (Net *)malloc(sizeof(Net));
+  if (n == NULL) {
+    // Handle memory allocation failure
+    fprintf(stderr, "Failed to allocate memory for Net\n");
+    exit(EXIT_FAILURE);
+  }
+
+  // Initialize the fields of the Net structure
+  n->connection_count = 0;
+  n->cell_count = 0;
+  n->cells = (Cell **)malloc(MAX_CONNECTIONS * sizeof(Cell *));
+  if (n->cells == NULL) {
+    // Handle memory allocation failure
+    fprintf(stderr, "Failed to allocate memory for cells\n");
+    free(n);
+    exit(EXIT_FAILURE);
+  }
+  n->connections =
+      (Connection **)malloc(MAX_CONNECTIONS * sizeof(Connection *));
+  if (n->connections == NULL) {
+    // Handle memory allocation failure
+    fprintf(stderr, "Failed to allocate memory for connections\n");
+    free(n->cells);
+    free(n);
+    exit(EXIT_FAILURE);
+  }
+
+  return n;
+}
+
+void free_net(Net *n) {
+  if (n != NULL) {
+    free(n->cells);
+    free(n->connections);
+    free(n);
+  }
+}
+
 void connect(Port *p, Port *q) {
   if (p == NULL || q == NULL) {
     return;
@@ -447,40 +489,154 @@ void print_connection(Connection *connection) {
   print_cell(connection->b);
 }
 
+Port *find_free_port(Net *n) {
+  for (int i = 0; i < n->cell_count; i++) {
+    Cell *c = n->cells[i];
+    if (c->principal_port->connections == 0) {
+      return c->principal_port;
+    } else if (c->symbol == SUM) {
+      if (c->auxiliary_ports[1]->connections == 0) {
+        return c->auxiliary_ports[1];
+      }
+    }
+  }
+  return NULL;
+}
+
+Net *sum_net(Net *right, Net *left, Port *r_free, Port *l_free) {
+  // right and left are both nets, we need to merge them into one net that has
+  // all the sum. We already know the free ports.
+  // The sum net will connect right to the main port, left to aux[0] and output
+  // on aux[1]
+  Net *sum = create_net_p();
+
+  for (int i = 0; i < right->cell_count; ++i) {
+    sum->cells[sum->cell_count++] = right->cells[i];
+  }
+
+  for (int i = 0; i < left->cell_count; ++i) {
+    sum->cells[sum->cell_count++] = left->cells[i];
+  }
+
+  for (int i = 0; i < right->connection_count; ++i) {
+    sum->connections[sum->connection_count++] = right->connections[i];
+  }
+
+  for (int i = 0; i < left->connection_count; ++i) {
+    sum->connections[sum->connection_count++] = left->connections[i];
+  }
+
+  Cell *sum_c = sum_cell(sum);
+  connect(sum_c->principal_port, r_free);
+  connect(sum_c->auxiliary_ports[0], l_free);
+
+  return sum;
+}
+
+Net *church_encode(int value) {
+  Net *n = create_net_p();
+  Cell *zero = zero_cell(n);
+
+  Port *to_connect = zero->principal_port;
+  for (int i = 0; i < value; i++) {
+    Cell *suc = suc_cell(n);
+    connect(suc->auxiliary_ports[0], to_connect);
+    to_connect = suc->principal_port;
+  }
+  return n;
+}
+
+// we also need to merge nets for this to be possible
+Net *to_net(ASTNode *node) {
+  if (node == NULL)
+    return NULL;
+
+  print_token(node->token);
+  if (node->token == PLUS) {
+    Net *right = to_net(node->right);
+    Port *r_free = find_free_port(right);
+    if (r_free == NULL) {
+      fprintf(stderr, "Right net should have free port.");
+      exit(EXIT_FAILURE);
+    }
+
+    Net *left = to_net(node->left);
+    Port *l_free = find_free_port(left);
+    if (l_free == NULL) {
+      fprintf(stderr, "Right net should have free port.");
+      exit(EXIT_FAILURE);
+    }
+
+    Net *sum = sum_net(right, left, r_free, l_free);
+    return sum;
+  } else if (node->token == DIGIT) {
+    printf("Digit value is: %i\n", node->value);
+    Net *digit = church_encode(node->value);
+    return digit;
+  }
+  return NULL;
+}
+
 int main() {
-  Net net = create_net();
-  Cell *z = zero_cell(&net);
-  Cell *s = suc_cell(&net);
-  // suc(0)
-  connect(z->principal_port, s->auxiliary_ports[0]);
+  const char *in = "((3 + 4) + (2 + 3))";
+  ASTNode *ast = parse(in);
+  Net *parsed = to_net(ast);
+  print_net(parsed);
+  free_net(parsed);
+  // int v = 0;
+  // Net *n = church_encode(v);
+  // Net *n_1 = church_encode(1);
 
-  Cell *z_1 = zero_cell(&net);
-  Cell *sum_c = sum_cell(&net);
-  // y = 0
-  connect(z_1->principal_port, sum_c->auxiliary_ports[0]);
-  // x = suc(0)
-  connect(s->principal_port, sum_c->principal_port);
-  Connection conn;
-  conn.a = s;
-  conn.b = sum_c;
-  conn.used = false;
-  net.connections[net.connection_count] = &conn;
-  net.connection_count++;
+  // Port *n_free = find_free_port(n);
+  // print_port(n_free);
+  // printf("===========================\n");
+  // Port *n_1_free = find_free_port(n_1);
+  // print_port(n_1_free);
+
+  // printf("===========================\n");
+  // print_net(n);
+  // printf("===========================\n");
+  // print_net(n_1);
+  // printf("===========================\n");
+
+  // Net *sum_n = sum_net(n, n_1, n_free, n_1_free);
+  // print_net(sum_n);
+
+  // free_net(n);
+  // free_net(n_1);
+  // Net net = create_net();
+  // Cell *z = zero_cell(&net);
+  // Cell *s = suc_cell(&net);
+  // // suc(0)
+  // connect(z->principal_port, s->auxiliary_ports[0]);
+
+  // Cell *z_1 = zero_cell(&net);
+  // Cell *sum_c = sum_cell(&net);
+  // // y = 0
+  // connect(z_1->principal_port, sum_c->auxiliary_ports[0]);
+  // // x = suc(0)
+  // connect(s->principal_port, sum_c->principal_port);
+  // Connection conn;
+  // conn.a = s;
+  // conn.b = sum_c;
+  // conn.used = false;
+  // net.connections[net.connection_count] = &conn;
+  // net.connection_count++;
+  // // print_net(&net);
+  // Rule r = find_reducible(&net);
+  // // print_rule(&r);
+  // r.reduce(&net, r.c->a, r.c->b, &conn);
   // print_net(&net);
-  Rule r = find_reducible(&net);
-  // print_rule(&r);
-  r.reduce(&net, r.c->a, r.c->b, &conn);
-  print_net(&net);
-  update_connections(&net);
+  // update_connections(&net);
 
-  Rule r2 = find_reducible(&net);
-  print_rule(&r2);
-  r2.reduce(&net, r2.c->a, r2.c->b, r2.c);
-  print_net(&net);
+  // Rule r2 = find_reducible(&net);
+  // print_rule(&r2);
+  // r2.reduce(&net, r2.c->a, r2.c->b, r2.c);
+  // print_net(&net);
 
-  update_connections(&net);
+  // update_connections(&net);
 
-  Rule r3 = find_reducible(&net);
-  printf("Is r3 a non reducible null rull (halted?) %i\n",
-         r3.reducible == false);
+  // Rule r3 = find_reducible(&net);
+  // printf("Is r3 a non reducible null rull (halted?) %i\n",
+  //        r3.reducible == false);
 }
