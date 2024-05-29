@@ -8,7 +8,7 @@ LDFLAGS = -lcudart -L/usr/local/cuda/lib64
 CUDA_SOURCES = inets.cu
 CUDA_OBJECTS = $(CUDA_SOURCES:.cu=.o)
 
-EXECUTABLE = main
+EXECUTABLE = inets
 
 # Default target
 all: $(EXECUTABLE)
