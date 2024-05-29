@@ -225,22 +225,6 @@ int main() {
     int val = church_decode(net);
     printf("Decoded value: %d\n", val);
     
-    // int last_cell_id = church_encode(net, 1);
-    // int last_id = church_encode(net, 1);
-    // Cell *s = sum_cell(net);
-
-    // link(net, s->cell_id, 0, last_cell_id, 0);
-    // link(net, s->cell_id, 1, last_id, 0);
-
-    
-
-    // if (find_reducible(net, &reduce_function, &a_id, &b_id)) {
-    //     reduce_function(net, net[a_id], net[b_id]);
-    // }
-
-    
-
-    // Free allocated memory
     for (int i = 0; i < MAX_CELLS; ++i) {
         if (net[i] != NULL) {
             delete_cell(net, i);

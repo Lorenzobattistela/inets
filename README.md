@@ -26,4 +26,8 @@ I also wrote a simple POC for my implementation idea in python, so `nets.py` sho
 
 WIP
 
+## Old approach
+
+When I first tried to implement inets, I tried something a bit more expressive in terms of legibility (using more structs), but it turns out to be a lot more complicated and really slow. The implementation is at `old_approach/cell.c` and `unary_arithmetics.c`. Not really easy to make it parallel the way it was wrote. But it works.
+
 
