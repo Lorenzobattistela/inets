@@ -143,6 +143,7 @@ void zero_sum(Net *net, Cell *zero, Cell *sum, Connection *conn) {
   // port of the sum rule to whatever in the 2nd aux
   connect(sum->auxiliary_ports[0]->connected_to,
           sum->auxiliary_ports[1]->connected_to);
+
   // and delete both + and 0
   delete_cell(net, zero);
   delete_cell(net, sum);
