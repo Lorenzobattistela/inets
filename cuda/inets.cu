@@ -4,15 +4,6 @@
 #include <stdlib.h>
 #include "inets.cuh"
 
-#define MAX_CELLS 3500
-
-#define SUM 0
-#define SUC 1
-#define ZERO 2
-
-#define SUC_SUM (SUM + SUC)
-#define ZERO_SUM (ZERO + SUM)
-
 TokenInfo current_token;
 
 TokenInfo get_next_token(const char **input) {
@@ -65,9 +56,6 @@ ASTNode *create_ast_node(Token token, int value, ASTNode *left,
   node->right = right;
   return node;
 }
-
-ASTNode *parse_expression(const char **input);
-ASTNode *parse_term(const char **input);
 
 ASTNode *parse_term(const char **input) {
   ASTNode *node;
@@ -135,18 +123,6 @@ void free_ast(ASTNode *node) {
   free_ast(node->right);
   free(node);
 }
-
-typedef struct {
-    int connected_cell;
-    int connected_port;
-} Port;
-
-typedef struct {
-    int cell_id;
-    int type;
-    int num_aux_ports;
-    Port *ports;
-} Cell;
 
 static int cell_counter = 0;
 
@@ -222,8 +198,6 @@ void zero_sum(Cell **cells, Cell *zero, Cell *s) {
     delete_cell(cells, zero->cell_id);
     delete_cell(cells, s->cell_id);
 }
-
-typedef void (*ReductionFunc)(Cell **, Cell *, Cell *);
 
 int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
     if (cell_a == NULL || cell_b == NULL) {
