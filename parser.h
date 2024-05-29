@@ -21,3 +21,4 @@ typedef struct ASTNode {
 ASTNode *parse(const char *input);
 void free_ast(ASTNode *node);
 void print_token(Token t);
+void print_ast(ASTNode *node);
