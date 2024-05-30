@@ -228,37 +228,31 @@ void handle_cuda_error(cudaError_t err) {
   }
 }
 
-// __device__ bool is_valid_rule(int rule) {
-//   return (rule == SUC_SUM) || (rule == ZERO_SUM);
-// }
+__device__ bool is_valid_rule(int rule) {
+  return (rule == SUC_SUM) || (rule == ZERO_SUM);
+}
 
- __global__ void find_reducible_kernel(Cell** net, int* a_ids, int* b_ids) {
+ __global__ void find_reducible_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if(idx >= 3500) return;
 
-  Cell *cell = net[idx];
-  if(cell == NULL) return;
+  int main_port_conn = main_port_connections[idx];
+  int a_cell_type = cell_types[idx];
 
-  Port main_port = cell->ports[0];
-  // printf("cell type is: %i\n", cell->type);
+  int connection_main = main_port_connections[main_port_conn];
+  int b_cell_type = cell_types[main_port_conn];
 
-  // but here we can return only the index of the active ports
-  // and the int that represents the rule that should be applied
-  // or simply apply the rule
-  // ill try the simplest one (the first one)
-  // if(main_port.connected_port == 0) {
-  //   Cell *connection = net[main_port.connected_cell];
-  //   if(connection == NULL) {
-  //     return;
-  //   }
-  //   printf("conn type is: %i\n", connection->type);
-    // int rule = cell->type + connection->type;
-    // if(is_valid_rule) {
-      // printf("index of valid rule: %i\n", idx);
-      // a_ids[idx] = rule;
-      // b_ids[idx] = main_port.connected_cell;
-    // }
-  // }
+  int rule = a_cell_type + b_cell_type;
+  if(!is_valid_rule(rule)) {
+    return;
+  }
+  // means both cells are connected by their main ports
+  if(connection_main == idx) {
+    cell_conns[idx] = main_port_conn;
+    cell_conns[main_port_conn] = idx;
+    conn_rules[idx] = rule;
+    conn_rules[main_port_conn] = rule;
+  }
   return;
  }
 
@@ -277,50 +271,44 @@ void handle_cuda_error(cudaError_t err) {
 // at the gpu. But we have to think a little bit more on how to copy aux ports and so on.
 
 // for now try to  make find_reducible_c return two arrays of ints. One containing the cells main port connections and other containing what rule we should use to reduce them
-void find_reducible_c(Cell** net, ReductionFunc *reduction_func, int *a_ids, int *b_ids) {
-  Cell **d_net;
-  size_t net_size = MAX_CELLS * sizeof(Cell *);
-  // 28000 which is 3500 * size of the pointer, correct
-  printf("size is: %lu\n", net_size);
-  cudaError_t err = cudaMalloc(&d_net, net_size);
+void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conns, int *conn_rules) {
+  int* d_main_port_connections;
+  int *d_cell_types;
+
+  size_t port_conns_size = MAX_CELLS * sizeof(int);
+  err = cudaMalloc(&d_main_port_connections, port_conns_size);
+  handle_cuda_error(err);
+  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size);
   handle_cuda_error(err);
 
-  err = cudaMemcpy(d_net, net, net_size, cudaMemcpyHostToDevice);
+  err = cudaMalloc(&d_cell_types, port_conns_size);
+  handle_cuda_error(err);
+  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size);
   handle_cuda_error(err);
 
-  ReductionFunc *d_reduction_func;
-  size_t red_size = sizeof(ReductionFunc *);
-  err = cudaMalloc(&d_reduction_func, red_size);
-  handle_cuda_error(err);
-  err = cudaMemcpy(d_reduction_func, reduction_func, red_size, cudaMemcpyHostToDevice);
+  int *d_cell_conns;
+  int *d_conn_rules;
 
-
-  int* d_a_ids;
-  int* d_b_ids;
-  size_t ids_size = MAX_CELLS * sizeof(int);
-  err = cudaMalloc(&d_a_ids, ids_size);
+  err = cudaMalloc(&d_cell_conns, port_conns_size);
   handle_cuda_error(err);
-  err = cudaMalloc(&d_b_ids, ids_size);
+  err = cudaMalloc(&d_conn_rules, port_conns_size);
   handle_cuda_error(err);
-
 
   int threadsPerBlock = 256;
   int blocksPerGrid = (MAX_CELLS + threadsPerBlock - 1) / threadsPerBlock;
 
-  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_net, d_a_ids, d_b_ids);
+  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules);
 
-  err = cudaMemcpy(net, d_net, ids_size, cudaMemcpyDeviceToHost);
+  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  err = cudaMemcpy(a_ids, d_a_ids, ids_size, cudaMemcpyDeviceToHost);
+  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  err = cudaMemcpy(b_ids, d_b_ids, ids_size, cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  cudaFree(d_a_ids);
-  cudaFree(d_b_ids);
-  cudaFree(d_net);
+  cudaFree(d_main_port_connections);
+  cudaFree(d_cell_types);
+  cudaFree(d_cell_conns);
+  cudaFree(d_conn_rules);
 }
 // ==============================================================
 
@@ -420,9 +408,18 @@ int main() {
 
     ReductionFunc reduce_function;
     int a_id, b_id;
+    
+    int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
+    for (int i = 0; i < MAX_CELLS; i++) {
+      Cell *c = net[i];
+      main_port_connections[i] = -1;
+      if (c == NULL) continue;
+      // this way if net[c->ports[0]->connected_cell] main port should be = to i.
+      main_port_connections[i] = c->ports[0].connected_cell;
+    }
 
-    int *a_ids = (int *) malloc(MAX_CELLS * sizeof(int));
-    int *b_ids = (int *) malloc(MAX_CELLS * sizeof(int));
+    int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
+    int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
 
     find_reducible_c(net, &reduce_function, a_ids, b_ids);
 
