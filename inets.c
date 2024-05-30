@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include "parser.h"
 
-#define MAX_CELLS 3500
+#define MAX_CELLS 35000
 
 #define SUM 0
 #define SUC 1
@@ -204,7 +205,7 @@ int to_net(Cell **net, ASTNode *node) {
 
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
-    const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
+    const char *in = "((1000 + 1000) + (1000 + 1000))";
     ASTNode *ast = parse(in);
     // print_ast(ast);
     to_net(net, ast);
@@ -212,6 +213,11 @@ int main() {
     ReductionFunc reduce_function;
     int a_id, b_id;
 
+    clock_t start, end;
+    double cpu_time_used;
+
+    start = clock();
+    int interactions = 0;
     while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
         if(net[a_id]->type == SUM && net[b_id]->type == SUC) {
             reduce_function(net, net[b_id], net[a_id]);
@@ -220,10 +226,19 @@ int main() {
         } else {
             reduce_function(net, net[a_id], net[b_id]);
         }
+        interactions++;
     }
+    end = clock();
+
+    cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+    double ips = (double)interactions / cpu_time_used;
 
     int val = church_decode(net);
     printf("Decoded value: %d\n", val);
+
+
+    printf("The program took %f seconds to execute and made %i interactions.\n", cpu_time_used, interactions);
+    printf("Interactions per second: %f\n", ips);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
         if (net[i] != NULL) {
