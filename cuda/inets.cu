@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include "inets.cuh"
 
@@ -124,6 +125,8 @@ void free_ast(ASTNode *node) {
   free(node);
 }
 
+// =============================================================
+
 static int cell_counter = 0;
 
 Cell* create_cell(int cell_type, int num_aux_ports) {
@@ -214,6 +217,55 @@ int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
     }
     return 0;
 }
+
+// ========================================== CUDa functions
+// __global__ void find_reducible_kernel(Cell** net, ReductionFunc *reduction_func, int *a_id, int *b_id);
+
+ __global__ void find_reducible_kernel(Cell** net) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  if(idx >= 3500) return;
+
+  Cell *cell = net[idx];
+
+  if(cell == NULL) return;
+
+  net[idx] = NULL;
+  return;
+ }
+
+
+void handle_cuda_error(cudaError_t err) {
+  if (err != cudaSuccess) {
+      fprintf(stderr, "Failed to allocate device memory - %s\n", cudaGetErrorString(err));
+      return;
+  }
+}
+
+void find_reducible_c(Cell** net, ReductionFunc *reduction_func, int *a_id, int *b_id) {
+  Cell **d_net;
+  size_t size = MAX_CELLS * sizeof(Cell *);
+  // 28000 which is 3500 * size of the pointer, correct
+  printf("size is: %lu\n", size);
+  cudaError_t err = cudaMalloc(&d_net, size);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(d_net, net, size, cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  int threadsPerBlock = 256;
+  int blocksPerGrid = (MAX_CELLS + threadsPerBlock - 1) / threadsPerBlock;
+
+  // ReductionFunc *d_reduction_func;
+
+  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_net);
+
+  cudaMemcpy(net, d_net, size, cudaMemcpyDeviceToHost);
+
+  cudaFree(d_net);
+}
+// ==============================================================
+
 
 int find_reducible(Cell **cells, ReductionFunc *reduction_func, int *a_id, int *b_id) {
     for (int i = 0; i < cell_counter; ++i) {
@@ -311,18 +363,26 @@ int main() {
     ReductionFunc reduce_function;
     int a_id, b_id;
 
-    while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
-        if(net[a_id]->type == SUM && net[b_id]->type == SUC) {
-            reduce_function(net, net[b_id], net[a_id]);
-        } else if (net[a_id]->type == SUM && net[b_id]->type == ZERO) {
-            reduce_function(net, net[b_id], net[a_id]);
-        } else {
-            reduce_function(net, net[a_id], net[b_id]);
-        }
+    find_reducible_c(net, &reduce_function, &a_id, &b_id);
+
+    for (int i = 0; i < 50; ++i) {
+      if(net[i] == NULL) {
+        printf("Cell %i is null\n.", i);
+      }
     }
 
-    int val = church_decode(net);
-    printf("Decoded value: %d\n", val);
+    // while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
+    //     if(net[a_id]->type == SUM && net[b_id]->type == SUC) {
+    //         reduce_function(net, net[b_id], net[a_id]);
+    //     } else if (net[a_id]->type == SUM && net[b_id]->type == ZERO) {
+    //         reduce_function(net, net[b_id], net[a_id]);
+    //     } else {
+    //         reduce_function(net, net[a_id], net[b_id]);
+    //     }
+    // }
+
+    // int val = church_decode(net);
+    // printf("Decoded value: %d\n", val);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
         if (net[i] != NULL) {
@@ -330,6 +390,7 @@ int main() {
         }
     }
     free_ast(ast);
+
     return 0;   
 }
 
