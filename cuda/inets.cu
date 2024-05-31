@@ -136,12 +136,71 @@ Cell* create_cell(int cell_type, int num_aux_ports) {
     cell->type = cell_type;
     cell->num_aux_ports = num_aux_ports;
     cell->ports = (Port*)malloc((num_aux_ports + 1) * sizeof(Port)); // +1 for the main port
+    if (cell->ports == NULL) {
+      printf("error allocating memory.");
+      exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < num_aux_ports + 1; ++i) {
         cell->ports[i].connected_cell = -1;
         cell->ports[i].connected_port = -1;
     }
     return cell;
 }
+
+// __device__ int create_cell_c(int **arr_net, int **arr_ports, int* cell_types, int cell_type, int cell_count) {
+//   int cell_id = atomicAdd(&cell_count, 1);
+//   cell_types[cell_id] = cell_type;
+//   for (int i = 0; i < MAX_PORTS; i++) {
+//     arr_net[cell_id][i] = -1;
+//     arr_ports[cell_id][i] = -1;
+//   }
+//   return cell_id;
+// }
+
+// __device__ int zero_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, ZERO, cell_count);
+//   return cell_id;
+// }
+
+// __device__ int suc_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
+//   return cell_id;
+// }
+
+// __device__ int sum_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
+//   return cell_id;
+// }
+
+// __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port, int b_id, int b_port) {
+//   if (a_id == -1 && b_id != -1) {
+//     arr_net[b_id][b_port] = -1;
+//     arr_ports[b_id][b_port] = -1;
+//   } else if (a_id != -1 && b_id == 1) {
+//     arr_net[a_id][a_port] = -1;
+//     arr_ports[a_id][a_port] = -1;
+//   } else {
+//     arr_net[a_id][a_port] = b_id;
+//     arr_ports[a_id][a_port] = b_port;
+//     arr_net[b_id][b_port] = a_id;
+//     arr_net[b_id][b_port] = a_port;
+//   }
+// }
+
+// __device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *main_port_connections) {
+//   arr_net[cell_id] = NULL;
+//   arr_ports[cell_id] = NULL;
+//   main_port_connections[cell_id] = -1;
+// }
+
+// __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int cell_count) {
+//   int new_suc = suc_cell_c(arr_net, arr_ports, cell_types, cell_count);
+//   int suc_first_aux_cell = arr_net[s][1];
+//   int suc_first_aux_ports = arr_ports[s][1];
+//   link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
+//   link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
+//   link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
+// }
 
 void delete_cell(Cell **cells, int cell_id) {
     free(cells[cell_id]->ports);
@@ -220,14 +279,10 @@ int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
 }
 
 // ========================================== CUDa functions
-// __global__ void find_reducible_kernel(Cell** net, ReductionFunc *reduction_func, int *a_id, int *b_id);
 
-void handle_cuda_error(cudaError_t err) {
-  if (err != cudaSuccess) {
-      fprintf(stderr, "Failed to allocate device memory - %s\n", cudaGetErrorString(err));
-      return;
-  }
-}
+// __global__ void reduce(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int cell_count, int **arr_cell, int **arr_ports) {
+
+// }
 
 __device__ bool is_valid_rule(int rule) {
   return (rule == SUC_SUM) || (rule == ZERO_SUM);
@@ -263,27 +318,71 @@ __device__ bool is_valid_rule(int rule) {
   return;
  }
 
+ void handle_cuda_error(cudaError_t err) {
+  if (err != cudaSuccess) {
+      fprintf(stderr, "Failed to allocate device memory - %s\n", cudaGetErrorString(err));
+      return;
+  }
+}
 
-// structs are not a good way of interacting with the gpu. Lets think abt an alternative. What info do we need to find active pairs?
-// we need the main ports of each cell connections, and who theyre connected to. Both integers. 
-// so in theory if we have an array 
-
-// instead of using structs we build 2 arrays
-// one that holds main port connections: e.g if we have cells[0] connected to cells[1] by main port, we would have [1, 0]
-// and another array holding the rule for them to reduce
-// e.g if 1 and 0 are a suc_sum, we would have [1, 1]
-// then we dont usre structs on the gpu because of the overhead of copying
-// after that we have the data needed to reduce cells.
-//  we can turn the reduce and link functions device functions, use atomic operations for linking and try to do all the reduction steps
-// at the gpu. But we have to think a little bit more on how to copy aux ports and so on.
-
-// for now try to  make find_reducible_c return two arrays of ints. One containing the cells main port connections and other containing what rule we should use to reduce them
-int find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conns, int *conn_rules) {
+int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
   int* d_main_port_connections;
   int *d_cell_types;
+  
+  // contains what cell is port X connected
+  int** d_arr_cells;
+  // contains what port is port X connected
+  int** d_arr_ports;
+
+  cudaError_t err = cudaMalloc(&d_arr_cells, MAX_CELLS * sizeof(int *));
+  handle_cuda_error(err);
+  err = cudaMalloc(&d_arr_ports, MAX_CELLS * sizeof(int *));
+  handle_cuda_error(err);
+
+  int *h_arr_cell[MAX_CELLS];
+  int *h_arr_port[MAX_CELLS];
+
+  for (int i = 0; i < MAX_CELLS; i++) {
+    err = cudaMalloc(&h_arr_cell[i], MAX_PORTS * sizeof(int));
+    handle_cuda_error(err);
+    err = cudaMalloc(&h_arr_port[i], MAX_PORTS * sizeof(int));
+    handle_cuda_error(err);
+
+    Cell *c = net[i];
+    int* connected_cell = (int *) malloc(MAX_PORTS * sizeof(int));
+    int* connected_port = (int *) malloc(MAX_PORTS * sizeof(int));
+
+    for (int j = 0; j < MAX_PORTS; j++) {
+      if (c == NULL) {
+        connected_cell[j] = -1;
+        connected_port[j] = -1;
+      } else if (j < c->num_aux_ports + 1) {
+        connected_cell[j] = c->ports[j].connected_cell;
+        connected_port[j] = c->ports[j].connected_port;
+      } else {
+        connected_cell[j] = -1;
+        connected_port[j] = -1;
+      }
+    }
+    
+    err = cudaMemcpy(h_arr_cell[i], connected_cell, MAX_PORTS * sizeof(int), cudaMemcpyHostToDevice);
+    handle_cuda_error(err);
+    free(connected_cell);
+
+    err = cudaMemcpy(h_arr_port[i], connected_port, MAX_PORTS * sizeof(int), cudaMemcpyHostToDevice);
+    handle_cuda_error(err);
+    free(connected_port);
+  }
+
+
+  err = cudaMemcpy(d_arr_cells, h_arr_cell, MAX_CELLS * sizeof(int *), cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(d_arr_ports, h_arr_port, MAX_CELLS * sizeof(int *), cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
 
   size_t port_conns_size = MAX_CELLS * sizeof(int);
-  cudaError_t err = cudaMalloc(&d_main_port_connections, port_conns_size);
+  err = cudaMalloc(&d_main_port_connections, port_conns_size);
   handle_cuda_error(err);
 
   err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
@@ -310,7 +409,7 @@ int find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conn
 
   int threadsPerBlock = cell_counter;
   int blocksPerGrid = 1;
-  
+
   int maxThreadsPerBlock;
   cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
 
@@ -330,11 +429,20 @@ int find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conn
   err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
+  // FREEING MEMORY
+  for (int i = 0; i < MAX_CELLS; ++i) {
+    cudaFree(h_arr_cell[i]);
+    cudaFree(h_arr_port[i]);
+  }
+  cudaFree(h_arr_cell);
+  cudaFree(h_arr_port);
   cudaFree(d_main_port_connections);
   cudaFree(d_cell_types);
   cudaFree(d_cell_conns);
   cudaFree(d_conn_rules);
   cudaFree(d_found);
+  cudaFree(d_arr_cells);
+  cudaFree(d_arr_ports);
 
   return h_found;
 }
@@ -473,7 +581,8 @@ void update_connections_and_cell_types(Cell **net, int *main_port_connections, i
 
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
-    const char *in = "((10 + 10) + (10 + 10))";
+
+    const char *in = "(1 + 1)";
     ASTNode *ast = parse(in);
     // print_ast(ast);
     to_net(net, ast);
@@ -493,7 +602,7 @@ int main() {
     double time_used;
 
     start = clock();
-    while ((reducible = find_reducible_c(main_port_connections, cell_types, cell_conns, conn_rules)) > 0) {
+    while ((reducible = process(main_port_connections, cell_types, net, cell_conns, conn_rules)) > 0) {
       reduce(net, cell_conns, conn_rules);
       interactions += 1;
       update_connections_and_cell_types(net, main_port_connections, cell_types);
@@ -510,9 +619,9 @@ int main() {
     printf("Interactions per second: %f\n", ips);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
-        if (net[i] != NULL) {
-            delete_cell(net, i);
-        }
+      if (net[i] != NULL) {
+          delete_cell(net, i);
+      }
     }
     free_ast(ast);
 
