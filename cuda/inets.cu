@@ -236,6 +236,9 @@ __device__ bool is_valid_rule(int rule) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if(idx >= 3500) return;
 
+  cell_conns[idx] = -1;
+  conn_rules[idx] = -1;
+
   int main_port_conn = main_port_connections[idx];
   int a_cell_type = cell_types[idx];
 
@@ -276,14 +279,15 @@ void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_con
   int *d_cell_types;
 
   size_t port_conns_size = MAX_CELLS * sizeof(int);
-  err = cudaMalloc(&d_main_port_connections, port_conns_size);
+  cudaError_t err = cudaMalloc(&d_main_port_connections, port_conns_size);
   handle_cuda_error(err);
-  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size);
+
+  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
   err = cudaMalloc(&d_cell_types, port_conns_size);
   handle_cuda_error(err);
-  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size);
+  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size, cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
   int *d_cell_conns;
@@ -304,6 +308,10 @@ void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_con
 
   err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
+
+  for(int i = 0; i < 50; i++) {
+    printf("i=%i cell cons=%i, conn_rule=%i\n", i, cell_conns[i], conn_rules[i]);
+  }
 
   cudaFree(d_main_port_connections);
   cudaFree(d_cell_types);
@@ -407,26 +415,48 @@ int main() {
     to_net(net, ast);
 
     ReductionFunc reduce_function;
-    int a_id, b_id;
     
     int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
+    int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
     for (int i = 0; i < MAX_CELLS; i++) {
       Cell *c = net[i];
       main_port_connections[i] = -1;
+      cell_types[i] = -1;
       if (c == NULL) continue;
       // this way if net[c->ports[0]->connected_cell] main port should be = to i.
       main_port_connections[i] = c->ports[0].connected_cell;
+      cell_types[i] = c->type;
     }
 
     int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
     int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
 
-    find_reducible_c(net, &reduce_function, a_ids, b_ids);
+    find_reducible_c(main_port_connections, cell_types, cell_conns, conn_rules);
 
-    for (int i = 0; i < 50; ++i) {
-      if(net[i] == NULL) {
-        printf("Cell %i is null\n.", i);
+    // after the gpu find_reducible, we get an array with the connections and the already valid rules. Now we simply get conditionally apply the functions 
+    for (int i = 0; i < MAX_CELLS; i++) {
+      int conn = cell_conns[i];
+      int rule = conn_rules[i];
+      // no rule existent or already used
+      if (conn == -1) continue;
+
+      Cell *a = net[i];
+      Cell *b = net[conn];
+
+      if (rule == SUC_SUM) {
+        if (a->type == SUM && b->type == SUC) {
+          suc_sum(net, b, a);
+        } else {
+          suc_sum(net, a, b);
+        }
+      } else if (rule == ZERO_SUM) {
+        if (a->type == SUM && b->type == ZERO) {
+          zero_sum(net, b, a);
+        } else {
+          zero_sum(net, a, b);
+        }
       }
+      cell_conns[i] = -1;
     }
 
     // while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
