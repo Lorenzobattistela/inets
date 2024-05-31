@@ -281,6 +281,37 @@ __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int s
 }
 
 __global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int cell_count, int **arr_cell, int **arr_ports) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx > MAX_CELLS) return;
+
+  int conn = cell_conns[idx];
+  int rule = conn_rules[idx];
+
+  if (conn == -1) return;
+
+  int a_connected_cell = arr_cell[idx];
+  int a_connected_port = arr_ports[idx];
+  int a_type = cell_types[idx];
+
+  int b_connected_cell = arr_cell[conn];
+  int b_connected_port = arr_ports[conn];
+  int b_type = cell_types[conn];
+
+  if (a_connected_cell == -1 || a_connected_port == -1) {
+    return;
+  } else if (b_connected_cell == -1 || b_connected_port == -1) {
+    return;
+  }
+
+  if (rule == SUC_SUM) {
+    if (a_type == SUM && b_type == SUC) {
+      // suc_sum_c(b, a);
+    } else {
+      // suc_sum_c(a, b);
+    }
+  } else if (rule == ZERO_SUM) {
+    if (a_type == SUM && b_type)
+  }
 }
 
 __device__ bool is_valid_rule(int rule) {
