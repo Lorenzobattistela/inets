@@ -147,61 +147,6 @@ Cell* create_cell(int cell_type, int num_aux_ports) {
     return cell;
 }
 
-// __device__ int create_cell_c(int **arr_net, int **arr_ports, int* cell_types, int cell_type, int cell_count) {
-//   int cell_id = atomicAdd(&cell_count, 1);
-//   cell_types[cell_id] = cell_type;
-//   for (int i = 0; i < MAX_PORTS; i++) {
-//     arr_net[cell_id][i] = -1;
-//     arr_ports[cell_id][i] = -1;
-//   }
-//   return cell_id;
-// }
-
-// __device__ int zero_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
-//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, ZERO, cell_count);
-//   return cell_id;
-// }
-
-// __device__ int suc_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
-//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
-//   return cell_id;
-// }
-
-// __device__ int sum_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
-//   int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
-//   return cell_id;
-// }
-
-// __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port, int b_id, int b_port) {
-//   if (a_id == -1 && b_id != -1) {
-//     arr_net[b_id][b_port] = -1;
-//     arr_ports[b_id][b_port] = -1;
-//   } else if (a_id != -1 && b_id == 1) {
-//     arr_net[a_id][a_port] = -1;
-//     arr_ports[a_id][a_port] = -1;
-//   } else {
-//     arr_net[a_id][a_port] = b_id;
-//     arr_ports[a_id][a_port] = b_port;
-//     arr_net[b_id][b_port] = a_id;
-//     arr_net[b_id][b_port] = a_port;
-//   }
-// }
-
-// __device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *main_port_connections) {
-//   arr_net[cell_id] = NULL;
-//   arr_ports[cell_id] = NULL;
-//   main_port_connections[cell_id] = -1;
-// }
-
-// __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int cell_count) {
-//   int new_suc = suc_cell_c(arr_net, arr_ports, cell_types, cell_count);
-//   int suc_first_aux_cell = arr_net[s][1];
-//   int suc_first_aux_ports = arr_ports[s][1];
-//   link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
-//   link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
-//   link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
-// }
-
 void delete_cell(Cell **cells, int cell_id) {
     free(cells[cell_id]->ports);
     free(cells[cell_id]);
@@ -280,9 +225,63 @@ int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
 
 // ========================================== CUDa functions
 
-// __global__ void reduce(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int cell_count, int **arr_cell, int **arr_ports) {
+__device__ int create_cell_c(int **arr_net, int **arr_ports, int* cell_types, int cell_type, int cell_count) {
+  int cell_id = atomicAdd(&cell_count, 1);
+  cell_types[cell_id] = cell_type;
+  for (int i = 0; i < MAX_PORTS; i++) {
+    arr_net[cell_id][i] = -1;
+    arr_ports[cell_id][i] = -1;
+  }
+  return cell_id;
+}
 
-// }
+__device__ int zero_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+  int cell_id = create_cell_c(arr_net, arr_ports, cell_types, ZERO, cell_count);
+  return cell_id;
+}
+
+__device__ int suc_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+  int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
+  return cell_id;
+}
+
+__device__ int sum_cell_c(int **arr_net, int **arr_ports, int *cell_types, int cell_count) {
+  int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
+  return cell_id;
+}
+
+__device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port, int b_id, int b_port) {
+  if (a_id == -1 && b_id != -1) {
+    arr_net[b_id][b_port] = -1;
+    arr_ports[b_id][b_port] = -1;
+  } else if (a_id != -1 && b_id == 1) {
+    arr_net[a_id][a_port] = -1;
+    arr_ports[a_id][a_port] = -1;
+  } else {
+    arr_net[a_id][a_port] = b_id;
+    arr_ports[a_id][a_port] = b_port;
+    arr_net[b_id][b_port] = a_id;
+    arr_net[b_id][b_port] = a_port;
+  }
+}
+
+__device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *main_port_connections) {
+  arr_net[cell_id] = NULL;
+  arr_ports[cell_id] = NULL;
+  main_port_connections[cell_id] = -1;
+}
+
+__device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int cell_count) {
+  int new_suc = suc_cell_c(arr_net, arr_ports, cell_types, cell_count);
+  int suc_first_aux_cell = arr_net[s][1];
+  int suc_first_aux_ports = arr_ports[s][1];
+  link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
+  link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
+  link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
+}
+
+__global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int cell_count, int **arr_cell, int **arr_ports) {
+}
 
 __device__ bool is_valid_rule(int rule) {
   return (rule == SUC_SUM) || (rule == ZERO_SUM);
@@ -422,6 +421,15 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
 
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
+
+  threadsPerBlock = h_found;
+  blocksPerGrid = 1;
+  if (threadsPerBlock > maxThreadsPerBlock) {
+    blocksPerGrid = (h_found + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+    threadsPerBlock = maxThreadsPerBlock;
+  }
+
+  reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, 10, d_arr_cells, d_arr_ports);
 
   err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
