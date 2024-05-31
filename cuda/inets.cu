@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>
 #include "inets.cuh"
 
 TokenInfo current_token;
@@ -232,7 +233,7 @@ __device__ bool is_valid_rule(int rule) {
   return (rule == SUC_SUM) || (rule == ZERO_SUM);
 }
 
- __global__ void find_reducible_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules) {
+ __global__ void find_reducible_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int *found) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if(idx >= 3500) return;
 
@@ -255,6 +256,9 @@ __device__ bool is_valid_rule(int rule) {
     cell_conns[main_port_conn] = idx;
     conn_rules[idx] = rule;
     conn_rules[main_port_conn] = rule;
+    if (*found == 0) {
+      atomicAdd(found, 1);
+    }
   }
   return;
  }
@@ -274,7 +278,7 @@ __device__ bool is_valid_rule(int rule) {
 // at the gpu. But we have to think a little bit more on how to copy aux ports and so on.
 
 // for now try to  make find_reducible_c return two arrays of ints. One containing the cells main port connections and other containing what rule we should use to reduce them
-void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conns, int *conn_rules) {
+int find_reducible_c(int *main_port_connections, int* cell_types, int *cell_conns, int *conn_rules) {
   int* d_main_port_connections;
   int *d_cell_types;
 
@@ -298,10 +302,27 @@ void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_con
   err = cudaMalloc(&d_conn_rules, port_conns_size);
   handle_cuda_error(err);
 
-  int threadsPerBlock = 256;
-  int blocksPerGrid = (MAX_CELLS + threadsPerBlock - 1) / threadsPerBlock;
+  int h_found;
+  int *d_found;
+  err = cudaMalloc(&d_found, sizeof(int));
+  handle_cuda_error(err);
+  cudaMemset(d_found, 0, sizeof(int));
 
-  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules);
+  int threadsPerBlock = cell_counter;
+  int blocksPerGrid = 1;
+  
+  int maxThreadsPerBlock;
+  cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
+
+  if (threadsPerBlock > maxThreadsPerBlock) {
+    blocksPerGrid = (cell_counter + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+    threadsPerBlock = maxThreadsPerBlock;
+  }
+
+  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
+
+  err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
 
   err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
@@ -309,14 +330,13 @@ void find_reducible_c(int *main_port_connections, int* cell_types, int *cell_con
   err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  for(int i = 0; i < 50; i++) {
-    printf("i=%i cell cons=%i, conn_rule=%i\n", i, cell_conns[i], conn_rules[i]);
-  }
-
   cudaFree(d_main_port_connections);
   cudaFree(d_cell_types);
   cudaFree(d_cell_conns);
   cudaFree(d_conn_rules);
+  cudaFree(d_found);
+
+  return h_found;
 }
 // ==============================================================
 
@@ -407,18 +427,40 @@ int to_net(Cell **net, ASTNode *node) {
     return -1;
 }
 
-int main() {
-    Cell *net[MAX_CELLS] = {NULL};
-    const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
-    ASTNode *ast = parse(in);
-    // print_ast(ast);
-    to_net(net, ast);
+void reduce(Cell **net, int *cell_conns, int *conn_rules) {
+  for (int i = 0; i < cell_counter; i++) {
+    int conn = cell_conns[i];
+    int rule = conn_rules[i];
+    // no rule existent or already used
+    if (conn == -1) continue;
 
-    ReductionFunc reduce_function;
+    Cell *a = net[i];
+    Cell *b = net[conn];
+
+    if (a == NULL || b == NULL) {
+      continue;
+    }
     
-    int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
-    int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
-    for (int i = 0; i < MAX_CELLS; i++) {
+    if (rule == SUC_SUM) {
+      if (a->type == SUM && b->type == SUC) {
+        suc_sum(net, b, a);
+      } else {
+        suc_sum(net, a, b);
+      }
+    } else if (rule == ZERO_SUM) {
+      if (a->type == SUM && b->type == ZERO) {
+        zero_sum(net, b, a);
+      } else {
+        zero_sum(net, a, b);
+      }
+    }
+    cell_conns[i] = -1;
+    cell_conns[conn] = -1;
+  }
+}
+
+void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types) {
+  for (int i = 0; i < cell_counter; i++) {
       Cell *c = net[i];
       main_port_connections[i] = -1;
       cell_types[i] = -1;
@@ -427,50 +469,45 @@ int main() {
       main_port_connections[i] = c->ports[0].connected_cell;
       cell_types[i] = c->type;
     }
+}
+
+int main() {
+    Cell *net[MAX_CELLS] = {NULL};
+    const char *in = "((10 + 10) + (10 + 10))";
+    ASTNode *ast = parse(in);
+    // print_ast(ast);
+    to_net(net, ast);
+    
+    int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
+    int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
+    
+    update_connections_and_cell_types(net, main_port_connections, cell_types);
 
     int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
     int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
 
-    find_reducible_c(main_port_connections, cell_types, cell_conns, conn_rules);
+    int interactions = 0;
+    int reducible;
 
-    // after the gpu find_reducible, we get an array with the connections and the already valid rules. Now we simply get conditionally apply the functions 
-    for (int i = 0; i < MAX_CELLS; i++) {
-      int conn = cell_conns[i];
-      int rule = conn_rules[i];
-      // no rule existent or already used
-      if (conn == -1) continue;
+    clock_t start, end;
+    double time_used;
 
-      Cell *a = net[i];
-      Cell *b = net[conn];
-
-      if (rule == SUC_SUM) {
-        if (a->type == SUM && b->type == SUC) {
-          suc_sum(net, b, a);
-        } else {
-          suc_sum(net, a, b);
-        }
-      } else if (rule == ZERO_SUM) {
-        if (a->type == SUM && b->type == ZERO) {
-          zero_sum(net, b, a);
-        } else {
-          zero_sum(net, a, b);
-        }
-      }
-      cell_conns[i] = -1;
+    start = clock();
+    while ((reducible = find_reducible_c(main_port_connections, cell_types, cell_conns, conn_rules)) > 0) {
+      reduce(net, cell_conns, conn_rules);
+      interactions += 1;
+      update_connections_and_cell_types(net, main_port_connections, cell_types);
     }
+    end = clock();
 
-    // while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
-    //     if(net[a_id]->type == SUM && net[b_id]->type == SUC) {
-    //         reduce_function(net, net[b_id], net[a_id]);
-    //     } else if (net[a_id]->type == SUM && net[b_id]->type == ZERO) {
-    //         reduce_function(net, net[b_id], net[a_id]);
-    //     } else {
-    //         reduce_function(net, net[a_id], net[b_id]);
-    //     }
-    // }
+    time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+    double ips = (double)interactions / time_used;
 
-    // int val = church_decode(net);
-    // printf("Decoded value: %d\n", val);
+    int val = church_decode(net);
+    printf("Decoded value: %d\n", val);
+
+    printf("The program took %f seconds to execute and made %i interactions.\n", time_used, interactions);
+    printf("Interactions per second: %f\n", ips);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
         if (net[i] != NULL) {

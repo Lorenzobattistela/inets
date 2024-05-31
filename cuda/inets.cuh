@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CELLS 3500
+#define MAX_CELLS 10000
 
 #define SUM 0
 #define SUC 1
