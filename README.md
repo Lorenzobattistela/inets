@@ -24,7 +24,22 @@ I also wrote a simple POC for my implementation idea in python, so `nets.py` sho
 
 ## Using CUDA to make it parallel
 
-WIP
+At first I decided to make `find_reducible` parallel. The reason is because it searches for active pairs through the whole net, so each thread can look up two cells and tell if they're reducible or not.
+
+After doing this, I still used the sequential way to reduce the nets. This makes the program lazy as hell, because we keep calling the kernel and all the memcpy operations happen for every reduction (if we have 4000 reductions we will do all the allocation and freeing 4000 times, this looks really bad). Thats why the perfomance drops and its a lot slower than the C sequential implementation.
+ 
+The next step is to make reductions parallel as well. We only have to be careful about ports linking. Since i have to make array copying everywhere (because I used C structs, and deep copies are not a good thing to do in CUDA), ill have to pass the ports of the cells as well so i can make the linking and then recopying into the old struct (or simply ignore all the structs and just use arrays everywhere, which would make it faster). Linking operations also have to be atomic, so we dont try to change a port if other thread is reducing it. So when linking two ports, both are locked by the atomic op.
+
+The result in the CPU function would be the reduced net. We can implement this step-wise and then add the while loop in the gpu as well, performing all the reductions there. This way the mem copying would happen only once in the beginning of the program and another time to give back the result.
+
+The reduction process would need one thread per redex.
+
+To process the whole net in the gpu, we'd have to generalize the kernel caller. Then we would need one kernel for finding reducible and another kernel to reduce. The former is solved already.
+
+### Reduce kernel:
+- We need an array of arrays of ints. (int **). This should hold the ports for a given cell. The array of ports of the cell with id 1 is obviously at ports[1]. This will be used on the linking step.
+- Rewrite the reduction functions as device, as well as the link function with atomic operations. Also the delete_cell, since we would have our GPU net as well.
+- Rewrite cell creation specifically to gpu. Atomic add to increase the cell_counter (shared memory).
 
 ## Old approach
 
