@@ -263,18 +263,19 @@ __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id
     arr_net[b_id][b_port] = a_id;
     arr_ports[b_id][b_port] = a_port;
   }
-  printf("A cell type: %i\n", cell_types[a_id]);
+  printf("A (id = %i) cell type: %i\n", a_id, cell_types[a_id]);
 
-  printf("B cell type: %i\n", cell_types[b_id]);
+  printf("B (id = %i) cell type: %i\n", b_id, cell_types[b_id]);
   printf("Connected cell %i from port %i to cell %i through port %i\n", a_id, a_port, b_id, b_port);
 }
 
-__device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports) {
+__device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *cell_types) {
   printf("Deleting cell with id %i\n", cell_id);
   for (int i = 0; i < MAX_PORTS; i++) {
     arr_net[cell_id][i] = -1;
     arr_ports[cell_id][i] = -1;
   }
+  cell_types[cell_id] = -1;
 }
 
 __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int *cell_count) {
@@ -284,18 +285,19 @@ __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int s
   link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
   link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
   link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
-  delete_cell_c(suc, arr_net, arr_ports);
+  delete_cell_c(suc, arr_net, arr_ports, cell_types);
 }
 
 __device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int zero, int s, int *cell_count) {
+  printf("performing a zero sum!");
   int sum_aux_first_connected_cell = arr_net[s][1];
   int sum_aux_first_connected_port = arr_ports[s][1];
 
   int sum_aux_snd_connected_cell = arr_net[s][2];
   int sum_aux_snd_connected_port = arr_ports[s][2];
   link_c(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell, sum_aux_first_connected_port, sum_aux_snd_connected_cell, sum_aux_snd_connected_port);
-  delete_cell_c(zero, arr_net, arr_ports);
-  delete_cell_c(s, arr_net, arr_ports);
+  delete_cell_c(zero, arr_net, arr_ports, cell_types);
+  delete_cell_c(s, arr_net, arr_ports, cell_types);
 }
 
 __device__ void update_connections_and_cell_types_c(int **arr_net, int **arr_ports, int *main_port_connections, int *cell_types) {
@@ -445,14 +447,7 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  cudaFree(d_cell_conns);
-  cudaFree(d_conn_rules);
+  printf("First found is: %i\n", h_found);
   // find reducible needs correct main_port_connections and cell_Types. Cell_conns and cell_rules are fresh
 
 
@@ -513,19 +508,13 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
   cudaMalloc(&d_cell_count, sizeof(int));
   cudaMemcpy(d_cell_count, &cell_counter, sizeof(int), cudaMemcpyHostToDevice);
 
-  int threadsPerBlock = 2;
-  int blocksPerGrid = 1;
-  int maxThreadsPerBlock;
-  cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
-  if (threadsPerBlock > maxThreadsPerBlock) {
-    blocksPerGrid = (2 + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
-    threadsPerBlock = maxThreadsPerBlock;
-  }
 
   // ==================================================================
-
   Cell **gpu_net;
+  int loop = 0;
   while (h_found > 0) {
+    // if (loop == 2) {exit(1);}
+    loop++;
     // reduces already update d_arr_cells and d_arr_ports
     // we need to update the main_port connections 
     // (easiest step now is convert back to Cell net) and update from there
@@ -540,6 +529,18 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
 
     int **d_result_cells;
     int **d_result_ports;
+
+    threadsPerBlock = 2;
+    blocksPerGrid = 1;
+    if (threadsPerBlock > maxThreadsPerBlock) {
+      blocksPerGrid = (2 + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+      threadsPerBlock = maxThreadsPerBlock;
+    }
+
+    reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
+    cudaDeviceSynchronize();
+
+    // need to copy to result cells
     err = cudaMalloc(&d_result_cells, MAX_CELLS * sizeof(int *));
     handle_cuda_error(err);
     err = cudaMalloc(&d_result_ports, MAX_CELLS * sizeof(int *));
@@ -558,11 +559,20 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
     err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
 
-    reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
-    cudaDeviceSynchronize();
+    for(int i = 0; i < MAX_CELLS; i++) {
+      int cell_t = cell_types[i];
+      if (cell_t == -1) continue;
+      printf("cell %i type =", i);
+      print_cell_type(cell_t);
+    }
 
     gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
-    update_connections_and_cell_types(net, main_port_connections, cell_types);
+    printf("gpu_net == null: %i\n", gpu_net == NULL);
+
+    // build up new main_port connections
+    for (int i = 0; i < MAX_CELLS; i++) {
+      main_port_connections[i] = h_result_cells[i][0];
+    }
 
     // prepare find kernel
     // malloc again because we freed before
@@ -570,6 +580,7 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
     handle_cuda_error(err);
     err = cudaMalloc(&d_conn_rules, port_conns_size);
     handle_cuda_error(err);
+    
     // cell_types are already updated
     // main port connections and cell types are updated on update_connections_and_cell_types(), but we need to pass them onto gpu again
     err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
@@ -577,6 +588,8 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
 
     err = cudaMemcpy(d_cell_types, cell_types, port_conns_size,   cudaMemcpyHostToDevice);
     handle_cuda_error(err);
+
+    cudaMemset(d_found, 0, sizeof(int));
 
     find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
 
@@ -593,6 +606,8 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
 
     cudaFree(d_cell_conns);
     cudaFree(d_conn_rules);
+    cudaFree(d_result_cells);
+    cudaFree(d_result_ports);
   }
 
   // FREEING MEMORY
@@ -600,9 +615,6 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
       cudaFree(h_arr_cell[i]);
       cudaFree(h_arr_port[i]);
   }
-  cudaFree(d_result_cells);
-  cudaFree(d_result_ports);
-
   for (int i = 0; i < MAX_CELLS; ++i) {
     cudaFree(h_arr_cell[i]);
     cudaFree(h_arr_port[i]);
@@ -665,7 +677,7 @@ Cell* find_zero_cell(Cell **net) {
 
 int church_decode(Cell **net) {
     Cell *cell = find_zero_cell(net);
-    if (!cell) {
+    if (cell == NULL) {
         printf("Not a church encoded number net!\n");
         return -1;
     }
@@ -673,10 +685,13 @@ int church_decode(Cell **net) {
     int val = 0;
 
     Port port = cell->ports[0];
+    printf("cell id: %i port connected to cell: %i\n", cell->cell_id, port.connected_cell);
 
     while (port.connected_cell != -1) {
+        Cell *z = net[port.connected_cell];
         port = net[port.connected_cell]->ports[0];
         val++;
+        printf("cell id: %i port connected to cell: %i\n", z->cell_id, port.connected_cell);
     }
     return val;
 }
@@ -768,7 +783,7 @@ bool is_null_cell(int *cell, int *port) {
   return true;
 }
 
-Cell **from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types) {
+void from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types) {
   // h result cells has the port.connected_cell from the cell with cell id i
   // same for port, but connected port.
   Cell *net[MAX_CELLS] = {NULL};
@@ -790,7 +805,8 @@ Cell **from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_typ
     } else if (cell_type == SUC) {
       c = suc_cell(net);
     }
-    Port *c_ports;
+    
+    Port *c_ports = (Port *)malloc(MAX_PORTS * sizeof(Port));
     for (int j = 0; j < c->num_aux_ports + 1; j++) {
       c_ports[j].connected_cell = cell[j];
       printf("Port %i is connected to cell %i and port %i\n", j, cell[j], port[j]);
@@ -798,7 +814,6 @@ Cell **from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_typ
     }
     c->ports = c_ports;
   }
-  return net;
 }
 
 void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types) {
@@ -825,6 +840,9 @@ int main() {
     int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
     
     update_connections_and_cell_types(net, main_port_connections, cell_types);
+    for (int i = cell_counter; i < MAX_CELLS; i++) {
+      cell_types[i] = -1;
+    }
 
     int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
     int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
@@ -836,13 +854,14 @@ int main() {
     double time_used;
 
     start = clock();
-    Cell **gpu_net = process(main_port_connections, cell_types, net, cell_conns, conn_rules);
+
+    process(main_port_connections, cell_types, net, cell_conns, conn_rules);
+
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
     double ips = (double)interactions / time_used;
     exit(1);
-
     int val = church_decode(net);
     printf("Decoded value: %d\n", val);
 
