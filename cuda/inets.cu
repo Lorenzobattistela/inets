@@ -397,12 +397,73 @@ __device__ bool is_valid_rule(int rule) {
   }
 }
 
-int find() {
-  int* d_main_port_connections;
+int find(int *main_port_connections, int *cell_types, int *cell_conns, int *conn_rules) {
+  int *d_main_port_connections;
   int *d_cell_types;
+
+  size_t port_conns_size = MAX_CELLS * sizeof(int);
+  cudaError_t err = cudaMalloc(&d_main_port_connections, port_conns_size);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  err = cudaMalloc(&d_cell_types, port_conns_size);
+  handle_cuda_error(err);
+  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size, cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  int *d_cell_conns;
+  int *d_conn_rules;
+
+  err = cudaMalloc(&d_cell_conns, port_conns_size);
+  handle_cuda_error(err);
+  err = cudaMalloc(&d_conn_rules, port_conns_size);
+  handle_cuda_error(err);
+
+  int h_found;
+  int *d_found;
+  err = cudaMalloc(&d_found, sizeof(int));
+  handle_cuda_error(err);
+  cudaMemset(d_found, 0, sizeof(int));
+
+  int threadsPerBlock = cell_counter;
+  int blocksPerGrid = 1;
+
+  int maxThreadsPerBlock;
+  cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
+  if (threadsPerBlock > maxThreadsPerBlock) {
+    blocksPerGrid = (cell_counter + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+    threadsPerBlock = maxThreadsPerBlock;
+  }
+
+  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
+
+  err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  printf("H found is: %i\n", h_found);
+
+  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  cudaFree(d_main_port_connections);
+  cudaFree(d_cell_types);
+  cudaFree(d_cell_conns);
+  cudaFree(d_conn_rules);
+  cudaFree(d_found);
+
+  return h_found;
 }
 
 int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
+  int found = find(main_port_connections, cell_types, cell_conns, conn_rules);
+  printf("found is: %i\n", found);
+  exit(1);
+
   int* d_main_port_connections;
   int *d_cell_types;
   
@@ -451,62 +512,12 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
     free(connected_port);
   }
 
-
   err = cudaMemcpy(d_arr_cells, h_arr_cell, MAX_CELLS * sizeof(int *), cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
   err = cudaMemcpy(d_arr_ports, h_arr_port, MAX_CELLS * sizeof(int *), cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
-  size_t port_conns_size = MAX_CELLS * sizeof(int);
-  err = cudaMalloc(&d_main_port_connections, port_conns_size);
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
-  handle_cuda_error(err);
-
-  err = cudaMalloc(&d_cell_types, port_conns_size);
-  handle_cuda_error(err);
-  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size, cudaMemcpyHostToDevice);
-  handle_cuda_error(err);
-
-  int *d_cell_conns;
-  int *d_conn_rules;
-
-  err = cudaMalloc(&d_cell_conns, port_conns_size);
-  handle_cuda_error(err);
-  err = cudaMalloc(&d_conn_rules, port_conns_size);
-  handle_cuda_error(err);
-
-  int h_found;
-  int *d_found;
-  err = cudaMalloc(&d_found, sizeof(int));
-  handle_cuda_error(err);
-  cudaMemset(d_found, 0, sizeof(int));
-
-  int threadsPerBlock = cell_counter;
-  int blocksPerGrid = 1;
-
-  int maxThreadsPerBlock;
-  cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
-
-  if (threadsPerBlock > maxThreadsPerBlock) {
-    blocksPerGrid = (cell_counter + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
-    threadsPerBlock = maxThreadsPerBlock;
-  }
-
-  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
-
-  err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  printf("H found is: %i\n", h_found);
-
-  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
 
   threadsPerBlock = h_found;
   blocksPerGrid = 1;
