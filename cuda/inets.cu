@@ -313,7 +313,7 @@ __device__ void update_connections_and_cell_types_c(int **arr_net, int **arr_por
   main_port_connections[idx] = cell_net[0];
 }
 
-__global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int *cell_count, int **arr_cell, int **arr_ports) {
+__global__ void reduce_kernel(int *cell_conns, int *cell_types, int *conn_rules, int *cell_count, int **arr_cell, int **arr_ports) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx > MAX_CELLS) return;
 
@@ -461,10 +461,8 @@ int find(int *main_port_connections, int *cell_types, int *cell_conns, int *conn
 
 int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
   int found = find(main_port_connections, cell_types, cell_conns, conn_rules);
-  printf("found is: %i\n", found);
-  exit(1);
 
-  int* d_main_port_connections;
+  // int *d_main_port_connections;
   int *d_cell_types;
   
   // contains what cell is port X connected
@@ -518,58 +516,61 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   err = cudaMemcpy(d_arr_ports, h_arr_port, MAX_CELLS * sizeof(int *), cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
-
-  threadsPerBlock = h_found;
-  blocksPerGrid = 1;
-  if (threadsPerBlock > maxThreadsPerBlock) {
-    blocksPerGrid = (h_found + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
-    threadsPerBlock = maxThreadsPerBlock;
-  }
-
   int *d_cell_count;
   cudaMalloc(&d_cell_count, sizeof(int));
   cudaMemcpy(d_cell_count, &cell_counter, sizeof(int), cudaMemcpyHostToDevice);
 
-  reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
+  int threadsPerBlock = 2;
+  int blocksPerGrid = 1;
+  int maxThreadsPerBlock;
+  cudaDeviceGetAttribute(&maxThreadsPerBlock, cudaDevAttrMaxThreadsPerBlock, 0);
+  if (threadsPerBlock > maxThreadsPerBlock) {
+    blocksPerGrid = (2 + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+    threadsPerBlock = maxThreadsPerBlock;
+  }
+
+  while (found > 0) {
+    // reduces already update d_arr_cells and d_arr_ports
+    // we need to update the main_port connections 
+    // (easiest step now is convert back to Cell net) and update from there
+    // then do the setup for finding reducible again
+    int *h_result_cells[MAX_CELLS];
+    int *h_result_ports[MAX_CELLS];
+
+    for (int i = 0; i < MAX_CELLS; i++) {
+        h_result_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+        h_result_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+    }
+
+    int **d_result_cells;
+    int **d_result_ports;
+    err = cudaMalloc(&d_result_cells, MAX_CELLS * sizeof(int *));
+    handle_cuda_error(err);
+    err = cudaMalloc(&d_result_ports, MAX_CELLS * sizeof(int *));
+    handle_cuda_error(err);
+    err = cudaMemcpy(d_result_cells, d_arr_cells, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
+    handle_cuda_error(err);
+    err = cudaMemcpy(d_result_ports, d_arr_ports, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
+    handle_cuda_error(err);
+    for (int i = 0; i < MAX_CELLS; i++) {
+        err = cudaMemcpy(h_result_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+        handle_cuda_error(err);
+
+        err = cudaMemcpy(h_result_ports[i], h_arr_port[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+        handle_cuda_error(err);
+    }
+    err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
+    handle_cuda_error(err);
+
+    Cell **gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
+
+    update_connections_and_cell_types(net, main_port_connections, cell_types);
+  }
+
+
+  reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
   cudaDeviceSynchronize();
 
-  int *h_result_cells[MAX_CELLS];
-  int *h_result_ports[MAX_CELLS];
-
-  for (int i = 0; i < MAX_CELLS; i++) {
-      h_result_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
-      h_result_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
-  }
-
-  int **d_result_cells;
-  int **d_result_ports;
-
-  err = cudaMalloc(&d_result_cells, MAX_CELLS * sizeof(int *));
-  handle_cuda_error(err);
-
-  err = cudaMalloc(&d_result_ports, MAX_CELLS * sizeof(int *));
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(d_result_cells, d_arr_cells, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(d_result_ports, d_arr_ports, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
-  handle_cuda_error(err);
-
-  for (int i = 0; i < MAX_CELLS; i++) {
-      err = cudaMemcpy(h_result_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
-      handle_cuda_error(err);
-
-      err = cudaMemcpy(h_result_ports[i], h_arr_port[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
-      handle_cuda_error(err);
-  }
-
-  err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  Cell **gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
-
-  update_connections_and_cell_types(net, main_port_connections, cell_types);
 
   err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
   handle_cuda_error(err);
