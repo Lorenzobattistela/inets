@@ -397,14 +397,16 @@ __device__ bool is_valid_rule(int rule) {
   }
 }
 
-int find(int *main_port_connections, int *cell_types, int *cell_conns, int *conn_rules) {
+
+Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
+  // =========================First Find Setup ==========================
+
   int *d_main_port_connections;
   int *d_cell_types;
-
   size_t port_conns_size = MAX_CELLS * sizeof(int);
+
   cudaError_t err = cudaMalloc(&d_main_port_connections, port_conns_size);
   handle_cuda_error(err);
-
   err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
   handle_cuda_error(err);
 
@@ -437,12 +439,11 @@ int find(int *main_port_connections, int *cell_types, int *cell_conns, int *conn
     threadsPerBlock = maxThreadsPerBlock;
   }
 
+  // first find reducible, we have to start somewhere
   find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
 
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
-
-  printf("H found is: %i\n", h_found);
 
   err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
@@ -450,27 +451,19 @@ int find(int *main_port_connections, int *cell_types, int *cell_conns, int *conn
   err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  cudaFree(d_main_port_connections);
-  cudaFree(d_cell_types);
   cudaFree(d_cell_conns);
   cudaFree(d_conn_rules);
-  cudaFree(d_found);
+  // find reducible needs correct main_port_connections and cell_Types. Cell_conns and cell_rules are fresh
 
-  return h_found;
-}
 
-int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
-  int found = find(main_port_connections, cell_types, cell_conns, conn_rules);
-
-  // int *d_main_port_connections;
-  int *d_cell_types;
+  // ==========================Reduce Setup==============================
   
   // contains what cell is port X connected
   int** d_arr_cells;
   // contains what port is port X connected
   int** d_arr_ports;
 
-  cudaError_t err = cudaMalloc(&d_arr_cells, MAX_CELLS * sizeof(int *));
+  err = cudaMalloc(&d_arr_cells, MAX_CELLS * sizeof(int *));
   handle_cuda_error(err);
   err = cudaMalloc(&d_arr_ports, MAX_CELLS * sizeof(int *));
   handle_cuda_error(err);
@@ -529,7 +522,10 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
     threadsPerBlock = maxThreadsPerBlock;
   }
 
-  while (found > 0) {
+  // ==================================================================
+
+  Cell **gpu_net;
+  while (h_found > 0) {
     // reduces already update d_arr_cells and d_arr_ports
     // we need to update the main_port connections 
     // (easiest step now is convert back to Cell net) and update from there
@@ -562,32 +558,44 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
     err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
 
-    Cell **gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
+    reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
+    cudaDeviceSynchronize();
 
+    gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
     update_connections_and_cell_types(net, main_port_connections, cell_types);
+
+    // prepare find kernel
+    // malloc again because we freed before
+    err = cudaMalloc(&d_cell_conns, port_conns_size);
+    handle_cuda_error(err);
+    err = cudaMalloc(&d_conn_rules, port_conns_size);
+    handle_cuda_error(err);
+    // cell_types are already updated
+    // main port connections and cell types are updated on update_connections_and_cell_types(), but we need to pass them onto gpu again
+    err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
+    handle_cuda_error(err);
+
+    err = cudaMemcpy(d_cell_types, cell_types, port_conns_size,   cudaMemcpyHostToDevice);
+    handle_cuda_error(err);
+
+    find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
+
+    err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
+    handle_cuda_error(err);
+
+    printf("h found is now set to: %i\n", h_found);
+
+    err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
+    handle_cuda_error(err);
+
+    err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
+    handle_cuda_error(err);
+
+    cudaFree(d_cell_conns);
+    cudaFree(d_conn_rules);
   }
 
-
-  reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
-  cudaDeviceSynchronize();
-
-
-  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
-  handle_cuda_error(err);
-
-  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size, cudaMemcpyHostToDevice);
-  handle_cuda_error(err);
-
-  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
-
-  err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
-  handle_cuda_error(err);
-
-  printf("H found is: %i\n", h_found);
-
-  // At this point, h_result_cells and h_result_ports contain the data from the device
-  
-
+  // FREEING MEMORY
   for (int i = 0; i < MAX_CELLS; i++) {
       cudaFree(h_arr_cell[i]);
       cudaFree(h_arr_port[i]);
@@ -595,7 +603,6 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   cudaFree(d_result_cells);
   cudaFree(d_result_ports);
 
-  // FREEING MEMORY
   for (int i = 0; i < MAX_CELLS; ++i) {
     cudaFree(h_arr_cell[i]);
     cudaFree(h_arr_port[i]);
@@ -611,7 +618,7 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   cudaFree(d_arr_ports);
   cudaFree(d_cell_count);
 
-  return h_found;
+  return gpu_net;
 }
 // ==============================================================
 
@@ -829,12 +836,7 @@ int main() {
     double time_used;
 
     start = clock();
-    reducible = process(main_port_connections, cell_types, net, cell_conns, conn_rules);
-    // while ((reducible = process(main_port_connections, cell_types, net, cell_conns, conn_rules)) > 0) {
-    //   reduce(net, cell_conns, conn_rules);
-    //   interactions += 1;
-    //   update_connections_and_cell_types(net, main_port_connections, cell_types);
-    // }
+    Cell **gpu_net = process(main_port_connections, cell_types, net, cell_conns, conn_rules);
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
