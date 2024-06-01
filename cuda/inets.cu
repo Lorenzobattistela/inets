@@ -254,21 +254,20 @@ __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id
   if (a_id == -1 && b_id != -1) {
     arr_net[b_id][b_port] = -1;
     arr_ports[b_id][b_port] = -1;
-  } else if (a_id != -1 && b_id == 1) {
+  } else if (a_id != -1 && b_id == -1) {
     arr_net[a_id][a_port] = -1;
     arr_ports[a_id][a_port] = -1;
   } else {
-    arr_net[a_id][a_port] = b_id;
+    arr_net[a_id][a_port] = b_id; 
     arr_ports[a_id][a_port] = b_port;
     arr_net[b_id][b_port] = a_id;
     arr_net[b_id][b_port] = a_port;
   }
 }
 
-__device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *main_port_connections) {
+__device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports) {
   arr_net[cell_id] = NULL;
   arr_ports[cell_id] = NULL;
-  main_port_connections[cell_id] = -1;
 }
 
 __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int *cell_count) {
@@ -278,6 +277,33 @@ __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int s
   link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
   link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
   link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
+  // delete_cell_c(suc, arr_net, arr_ports)
+}
+
+__device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int zero, int s, int *cell_count) {
+  int sum_aux_first_connected_cell = arr_net[s][1];
+  int sum_aux_first_connected_port = arr_ports[s][1];
+
+  int sum_aux_snd_connected_cell = arr_net[s][2];
+  int sum_aux_snd_connected_port = arr_ports[s][2];
+  link_c(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell, sum_aux_first_connected_port, sum_aux_snd_connected_cell, sum_aux_snd_connected_port);
+  delete_cell_c(zero, arr_net, arr_ports);
+  delete_cell_c(s, arr_net, arr_ports);
+}
+
+__device__ void update_connections_and_cell_types_c(int **arr_net, int **arr_ports, int *main_port_connections, int *cell_types) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if(idx >= 3500) return;
+
+  int *cell_net = arr_net[idx];
+  int *cell_port = arr_ports[idx];
+
+  main_port_connections[idx] = -1;
+  cell_types[idx] = -1;
+
+  if (cell_net == NULL || cell_port == NULL) return;
+
+  main_port_connections[idx] = cell_net[0];
 }
 
 __global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int *cell_count, int **arr_cell, int **arr_ports) {
@@ -304,15 +330,19 @@ __global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *
     return;
   }
 
-  // if (rule == SUC_SUM) {
-  //   if (a_type == SUM && b_type == SUC) {
-  //     suc_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
-  //   } else {
-  //     suc_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
-  //   }
-  // } else if (rule == ZERO_SUM) {
-  //   // if (a_type == SUM && b_type)
-  // }
+  if (rule == SUC_SUM) {
+    if (a_type == SUM && b_type == SUC) {
+      suc_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
+    } else {
+      suc_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
+    }
+  } else if (rule == ZERO_SUM) {
+    if (a_type == SUM && b_type == ZERO) {
+      zero_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
+    } else {
+      zero_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
+    }
+  }
 }
 
 __device__ bool is_valid_rule(int rule) {
@@ -466,6 +496,8 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   cudaMemcpy(d_cell_count, &cell_counter, sizeof(int), cudaMemcpyHostToDevice);
 
   reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
+
+  cudaDeviceSynchronize();
 
   err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
