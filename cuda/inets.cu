@@ -246,7 +246,7 @@ __device__ int suc_cell_c(int **arr_net, int **arr_ports, int *cell_types, int *
 }
 
 __device__ int sum_cell_c(int **arr_net, int **arr_ports, int *cell_types, int *cell_count) {
-  int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUC, cell_count);
+  int cell_id = create_cell_c(arr_net, arr_ports, cell_types, SUM, cell_count);
   return cell_id;
 }
 
@@ -261,23 +261,30 @@ __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id
     arr_net[a_id][a_port] = b_id; 
     arr_ports[a_id][a_port] = b_port;
     arr_net[b_id][b_port] = a_id;
-    arr_net[b_id][b_port] = a_port;
+    arr_ports[b_id][b_port] = a_port;
   }
+  printf("A cell type: %i\n", cell_types[a_id]);
+
+  printf("B cell type: %i\n", cell_types[b_id]);
+  printf("Connected cell %i from port %i to cell %i through port %i\n", a_id, a_port, b_id, b_port);
 }
 
 __device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports) {
-  arr_net[cell_id] = NULL;
-  arr_ports[cell_id] = NULL;
+  printf("Deleting cell with id %i\n", cell_id);
+  for (int i = 0; i < MAX_PORTS; i++) {
+    arr_net[cell_id][i] = -1;
+    arr_ports[cell_id][i] = -1;
+  }
 }
 
 __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int suc, int s, int *cell_count) {
   int new_suc = suc_cell_c(arr_net, arr_ports, cell_types, cell_count);
-  int suc_first_aux_cell = arr_net[s][1];
-  int suc_first_aux_ports = arr_ports[s][1];
+  int suc_first_aux_cell = arr_net[suc][1];
+  int suc_first_aux_ports = arr_ports[suc][1];
   link_c(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
   link_c(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
   link_c(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
-  // delete_cell_c(suc, arr_net, arr_ports)
+  delete_cell_c(suc, arr_net, arr_ports);
 }
 
 __device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int zero, int s, int *cell_count) {
@@ -311,6 +318,7 @@ __global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *
   if (idx > MAX_CELLS) return;
 
   int conn = cell_conns[idx];
+  printf("Cell %i is connected trough main port with %i\n", idx, conn);
   int rule = conn_rules[idx];
 
   if (conn == -1) return;
@@ -343,6 +351,9 @@ __global__ void reduce_kernel(int *main_port_connections, int *cell_conns, int *
       zero_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
     }
   }
+  int i = 0;
+  printf("cell %i main port is now connected to cell %i through port %i\n", i, arr_cell[i][0], arr_ports[i][0]);
+  printf("cell %i has type %i\n", 5, cell_types[5]);
 }
 
 __device__ bool is_valid_rule(int rule) {
@@ -384,6 +395,11 @@ __device__ bool is_valid_rule(int rule) {
       fprintf(stderr, "Failed to allocate device memory - %s\n", cudaGetErrorString(err));
       return;
   }
+}
+
+int find() {
+  int* d_main_port_connections;
+  int *d_cell_types;
 }
 
 int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
@@ -484,6 +500,14 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
+  printf("H found is: %i\n", h_found);
+
+  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
   threadsPerBlock = h_found;
   blocksPerGrid = 1;
   if (threadsPerBlock > maxThreadsPerBlock) {
@@ -496,14 +520,68 @@ int process(int *main_port_connections, int* cell_types, Cell **net, int *cell_c
   cudaMemcpy(d_cell_count, &cell_counter, sizeof(int), cudaMemcpyHostToDevice);
 
   reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_cell_count, d_arr_cells, d_arr_ports);
-
   cudaDeviceSynchronize();
 
-  err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
+  int *h_result_cells[MAX_CELLS];
+  int *h_result_ports[MAX_CELLS];
+
+  for (int i = 0; i < MAX_CELLS; i++) {
+      h_result_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+      h_result_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+  }
+
+  int **d_result_cells;
+  int **d_result_ports;
+
+  err = cudaMalloc(&d_result_cells, MAX_CELLS * sizeof(int *));
   handle_cuda_error(err);
 
-  err = cudaMemcpy(conn_rules, d_conn_rules, port_conns_size, cudaMemcpyDeviceToHost);
+  err = cudaMalloc(&d_result_ports, MAX_CELLS * sizeof(int *));
   handle_cuda_error(err);
+
+  err = cudaMemcpy(d_result_cells, d_arr_cells, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(d_result_ports, d_arr_ports, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
+  handle_cuda_error(err);
+
+  for (int i = 0; i < MAX_CELLS; i++) {
+      err = cudaMemcpy(h_result_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+      handle_cuda_error(err);
+
+      err = cudaMemcpy(h_result_ports[i], h_arr_port[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+      handle_cuda_error(err);
+  }
+
+  err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  Cell **gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
+
+  update_connections_and_cell_types(net, main_port_connections, cell_types);
+
+  err = cudaMemcpy(d_main_port_connections, main_port_connections, port_conns_size, cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  err = cudaMemcpy(d_cell_types, cell_types, port_conns_size, cudaMemcpyHostToDevice);
+  handle_cuda_error(err);
+
+  find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
+
+  err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
+  handle_cuda_error(err);
+
+  printf("H found is: %i\n", h_found);
+
+  // At this point, h_result_cells and h_result_ports contain the data from the device
+  
+
+  for (int i = 0; i < MAX_CELLS; i++) {
+      cudaFree(h_arr_cell[i]);
+      cudaFree(h_arr_port[i]);
+  }
+  cudaFree(d_result_cells);
+  cudaFree(d_result_ports);
 
   // FREEING MEMORY
   for (int i = 0; i < MAX_CELLS; ++i) {
@@ -642,6 +720,66 @@ void reduce(Cell **net, int *cell_conns, int *conn_rules) {
     cell_conns[i] = -1;
     cell_conns[conn] = -1;
   }
+}
+
+void print_cell_type(int type) {
+  switch (type) {
+    case ZERO:
+      printf("ZERO");
+      break;
+    case SUM:
+      printf("SUM");
+      break;
+    case SUC:
+      printf("SUC");
+      break;
+    default:
+      printf("Invalid cell type\n");
+      break;
+  }
+  printf("\n");
+}
+
+bool is_null_cell(int *cell, int *port) {
+  for (int i = 0; i < MAX_PORTS; i++) {
+    if (cell[i] != -1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Cell **from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types) {
+  // h result cells has the port.connected_cell from the cell with cell id i
+  // same for port, but connected port.
+  Cell *net[MAX_CELLS] = {NULL};
+  for (int i = 0; i < MAX_CELLS; i++) {
+    int *cell = h_result_cells[i];
+    int *port = h_result_ports[i];
+    int cell_type = cell_types[i];
+    if (cell == NULL || port == NULL || cell_type == -1 || is_null_cell(cell, port)) continue;
+
+    Cell *c;
+
+    printf("Cell i=%i type: ", i);
+    print_cell_type(cell_type);
+
+    if (cell_type == ZERO) {
+      c = zero_cell(net);
+    } else if(cell_type == SUM) {
+      c = sum_cell(net);
+    } else if (cell_type == SUC) {
+      c = suc_cell(net);
+    }
+    Port *c_ports;
+    for (int j = 0; j < c->num_aux_ports + 1; j++) {
+      c_ports[j].connected_cell = cell[j];
+      printf("Port %i is connected to cell %i and port %i\n", j, cell[j], port[j]);
+      c_ports[j].connected_port = port[j];
+    }
+    c->ports = c_ports;
+  }
+  return net;
 }
 
 void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types) {

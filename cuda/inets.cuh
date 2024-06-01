@@ -67,3 +67,7 @@ int church_encode(Cell **net, int num);
 Cell* find_zero_cell(Cell **net);
 int church_decode(Cell **net);
 int to_net(Cell **net, ASTNode *node);
+Cell **from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types);
+
+void print_cell_type(int type);
+void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types);
