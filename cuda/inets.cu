@@ -341,21 +341,22 @@ __global__ void reduce_kernel(int *cell_conns, int *cell_types, int *conn_rules,
   }
 
   if (rule == SUC_SUM) {
+    printf("PERFORMING SUC SUM\n");
+    printf("IM A THREAD WITH IDX: %i\n", idx);
     if (a_type == SUM && b_type == SUC) {
       suc_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
     } else {
       suc_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
     }
   } else if (rule == ZERO_SUM) {
+    printf("PERFORMING ZERO SUM\n");
+    printf("IM A THREAD WITH IDX: %i\n", idx);
     if (a_type == SUM && b_type == ZERO) {
       zero_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
     } else {
       zero_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
     }
   }
-  int i = 0;
-  printf("cell %i main port is now connected to cell %i through port %i\n", i, arr_cell[i][0], arr_ports[i][0]);
-  printf("cell %i has type %i\n", 5, cell_types[5]);
 }
 
 __device__ bool is_valid_rule(int rule) {
@@ -364,7 +365,7 @@ __device__ bool is_valid_rule(int rule) {
 
  __global__ void find_reducible_kernel(int *main_port_connections, int *cell_conns, int *cell_types, int *conn_rules, int *found) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx >= 3500) return;
+  if(idx >= MAX_CELLS) return;
 
   cell_conns[idx] = -1;
   conn_rules[idx] = -1;
@@ -381,10 +382,12 @@ __device__ bool is_valid_rule(int rule) {
   }
   // means both cells are connected by their main ports
   if(connection_main == idx) {
+    if (idx > main_port_conn) {
+      return;
+    }
+
     cell_conns[idx] = main_port_conn;
-    cell_conns[main_port_conn] = idx;
     conn_rules[idx] = rule;
-    conn_rules[main_port_conn] = rule;
     if (*found == 0) {
       atomicAdd(found, 1);
     }
@@ -400,7 +403,7 @@ __device__ bool is_valid_rule(int rule) {
 }
 
 
-Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
+Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
   // =========================First Find Setup ==========================
 
   int *d_main_port_connections;
@@ -510,7 +513,7 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
 
 
   // ==================================================================
-  Cell **gpu_net;
+  
   int loop = 0;
   while (h_found > 0) {
     // if (loop == 2) {exit(1);}
@@ -530,10 +533,10 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
     int **d_result_cells;
     int **d_result_ports;
 
-    threadsPerBlock = 2;
+    threadsPerBlock = MAX_CELLS;
     blocksPerGrid = 1;
     if (threadsPerBlock > maxThreadsPerBlock) {
-      blocksPerGrid = (2 + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+      blocksPerGrid = (MAX_CELLS + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
       threadsPerBlock = maxThreadsPerBlock;
     }
 
@@ -562,12 +565,10 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
     for(int i = 0; i < MAX_CELLS; i++) {
       int cell_t = cell_types[i];
       if (cell_t == -1) continue;
-      printf("cell %i type =", i);
+      printf("cell %i type = ", i);
       print_cell_type(cell_t);
     }
 
-    gpu_net = from_gpu_to_net(h_result_cells, h_result_ports, cell_types);
-    printf("gpu_net == null: %i\n", gpu_net == NULL);
 
     // build up new main_port connections
     for (int i = 0; i < MAX_CELLS; i++) {
@@ -591,12 +592,25 @@ Cell **process(int *main_port_connections, int* cell_types, Cell **net, int *cel
 
     cudaMemset(d_found, 0, sizeof(int));
 
+    threadsPerBlock = MAX_CELLS;
+    blocksPerGrid = 1;
+
+    if (threadsPerBlock > maxThreadsPerBlock) {
+      blocksPerGrid = (cell_counter + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
+      threadsPerBlock = maxThreadsPerBlock;
+    }
+
     find_reducible_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_main_port_connections, d_cell_conns, d_cell_types, d_conn_rules, d_found);
+    cudaDeviceSynchronize();
 
     err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
 
     printf("h found is now set to: %i\n", h_found);
+    if (h_found == 0) {
+      // the problem with this is that piles up the nets
+      from_gpu_to_net(gpu_net, h_result_cells, h_result_ports, cell_types);
+    }
 
     err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
@@ -667,9 +681,11 @@ int church_encode(Cell **net, int num) {
 }
 
 Cell* find_zero_cell(Cell **net) {
-    for (int i = 0; i < cell_counter; ++i) {
-        if (net[i] != NULL && net[i]->type == ZERO) {
-            return net[i];
+    for (int i = 0; i < MAX_CELLS; ++i) {
+        Cell *c = net[i];
+        if (c == NULL) continue;
+        if (c->type == ZERO) {
+          return c;
         }
     }
     return NULL;
@@ -677,6 +693,7 @@ Cell* find_zero_cell(Cell **net) {
 
 int church_decode(Cell **net) {
     Cell *cell = find_zero_cell(net);
+    printf("Zero cell has id: %i\n", cell->cell_id);
     if (cell == NULL) {
         printf("Not a church encoded number net!\n");
         return -1;
@@ -689,6 +706,7 @@ int church_decode(Cell **net) {
 
     while (port.connected_cell != -1) {
         Cell *z = net[port.connected_cell];
+        printf("z null: %i\n", z == NULL);
         port = net[port.connected_cell]->ports[0];
         val++;
         printf("cell id: %i port connected to cell: %i\n", z->cell_id, port.connected_cell);
@@ -783,15 +801,18 @@ bool is_null_cell(int *cell, int *port) {
   return true;
 }
 
-void from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types) {
+void from_gpu_to_net(Cell **net, int **h_result_cells, int **h_result_ports, int *cell_types) {
+  cell_counter = 0;
   // h result cells has the port.connected_cell from the cell with cell id i
   // same for port, but connected port.
-  Cell *net[MAX_CELLS] = {NULL};
   for (int i = 0; i < MAX_CELLS; i++) {
     int *cell = h_result_cells[i];
     int *port = h_result_ports[i];
     int cell_type = cell_types[i];
-    if (cell == NULL || port == NULL || cell_type == -1 || is_null_cell(cell, port)) continue;
+    if (cell == NULL || port == NULL || cell_type == -1 || is_null_cell(cell, port)) { 
+      cell_counter++; 
+      continue;
+    };
 
     Cell *c;
 
@@ -814,6 +835,15 @@ void from_gpu_to_net(int **h_result_cells, int **h_result_ports, int *cell_types
     }
     c->ports = c_ports;
   }
+
+  for (int i = 0; i < MAX_CELLS; i++) {
+    Cell *c = net[i];
+    if (c == NULL) {
+      continue;
+    }
+    print_cell_type(c->type);
+    printf("Cell %i with cell id %i\n", i, c->cell_id);
+  }
 }
 
 void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types) {
@@ -831,7 +861,7 @@ void update_connections_and_cell_types(Cell **net, int *main_port_connections, i
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
 
-    const char *in = "(1 + 1)";
+    const char *in = "(2 + 2)";
     ASTNode *ast = parse(in);
     // print_ast(ast);
     to_net(net, ast);
@@ -852,21 +882,21 @@ int main() {
 
     clock_t start, end;
     double time_used;
-
+    Cell *gpu_net[MAX_CELLS] = {NULL};
     start = clock();
 
-    process(main_port_connections, cell_types, net, cell_conns, conn_rules);
-
+    process(gpu_net, main_port_connections, cell_types, net, cell_conns, conn_rules);
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-    double ips = (double)interactions / time_used;
-    exit(1);
-    int val = church_decode(net);
+    // double ips = (double)interactions / time_used;
+        // exit(1);
+    int val = church_decode(gpu_net);
     printf("Decoded value: %d\n", val);
 
+
     printf("The program took %f seconds to execute and made %i interactions.\n", time_used, interactions);
-    printf("Interactions per second: %f\n", ips);
+    // printf("Interactions per second: %f\n", ips);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
       if (net[i] != NULL) {
