@@ -191,7 +191,7 @@ void link(Cell **cells, int a, int a_idx, int b, int b_idx) {
     }
 }
 
-// ========================================== CUDa functions
+// ========================================== CUDA functions
 
 __device__ int create_cell_c(int **arr_net, int **arr_ports, int* cell_types, int cell_type, int *cell_count) {
   int cell_id = atomicAdd(cell_count, 1);
@@ -260,21 +260,6 @@ __device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int 
   link_c(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell, sum_aux_first_connected_port, sum_aux_snd_connected_cell, sum_aux_snd_connected_port);
   delete_cell_c(zero, arr_net, arr_ports, cell_types);
   delete_cell_c(s, arr_net, arr_ports, cell_types);
-}
-
-__device__ void update_connections_and_cell_types_c(int **arr_net, int **arr_ports, int *main_port_connections, int *cell_types) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx >= MAX_CELLS) return;
-
-  int *cell_net = arr_net[idx];
-  int *cell_port = arr_ports[idx];
-
-  main_port_connections[idx] = -1;
-  cell_types[idx] = -1;
-
-  if (cell_net == NULL || cell_port == NULL) return;
-
-  main_port_connections[idx] = cell_net[0];
 }
 
 __global__ void reduce_kernel(int *cell_conns, int *cell_types, int *conn_rules, int *cell_count, int **arr_cell, int **arr_ports) {
@@ -360,7 +345,7 @@ __device__ bool is_valid_rule(int rule) {
 }
 
 
-Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
+Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
   // =========================First Find Setup ==========================
 
   int *d_main_port_connections;
@@ -639,7 +624,6 @@ int church_decode(Cell **net) {
     Port port = cell->ports[0];
 
     while (port.connected_cell != -1) {
-        Cell *z = net[port.connected_cell];
         port = net[port.connected_cell]->ports[0];
         val++;
     }
@@ -751,21 +735,158 @@ void update_connections_and_cell_types(Cell **net, int *main_port_connections, i
     }
 }
 
+int create_cell(int **arr_net, int **arr_ports, int* cell_types, int cell_type) {
+  int cell_id = cell_counter++;
+  cell_types[cell_id] = cell_type;
+  for (int i = 0; i < MAX_PORTS; i++) {
+    arr_net[cell_id][i] = -1;
+    arr_ports[cell_id][i] = -1;
+  }
+  return cell_id;
+}
+
+int zero_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, ZERO);
+  return cell_id;
+}
+
+int suc_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUC);
+  return cell_id;
+}
+
+int sum_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUM);
+  return cell_id;
+}
+
+
+void link(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port, int b_id, int b_port) {
+  if (a_id == -1 && b_id != -1) {
+    arr_net[b_id][b_port] = -1;
+    arr_ports[b_id][b_port] = -1;
+  } else if (a_id != -1 && b_id == -1) {
+    arr_net[a_id][a_port] = -1;
+    arr_ports[a_id][a_port] = -1;
+  } else {
+    arr_net[a_id][a_port] = b_id; 
+    arr_ports[a_id][a_port] = b_port;
+    arr_net[b_id][b_port] = a_id;
+    arr_ports[b_id][b_port] = a_port;
+  }
+}
+
+int church_encode(int **arr_cells, int **arr_ports, int *cell_types, int num) {
+  int zero = zero_cell(arr_cells, arr_ports, cell_types);
+  int to_connect_cell = zero;
+  int to_connect_port = 0;
+
+  for (int i = 0; i < num; i++) {
+    int suc = suc_cell(arr_cells, arr_ports, cell_types);
+    link(arr_cells, arr_ports, cell_types, suc, 1, to_connect_cell, to_connect_port);
+    to_connect_cell = suc;
+    to_connect_port = 0;
+  }
+  return to_connect_cell;
+}
+
+int find_zero_cell(int *cell_types) {
+  for (int i = 0; i < MAX_CELLS; i++) {
+    int type = cell_types[i];
+    if (type == ZERO) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int church_decode(int **arr_cells, int **arr_ports, int *cell_types) {
+  int zero = find_zero_cell(cell_types);
+  if (zero == -1) {
+    printf("Not a church encoded number net!\n");
+    return -1;
+  }
+
+  int val = 0;
+
+  int port_connected_cell = arr_cells[zero][0];
+
+  while (port_connected_cell != -1) {
+    port_connected_cell = arr_cells[port_connected_cell][0];
+    val++;
+  }
+  return val;
+}
+
+int to_interaction_net(ASTNode *node, int **arr_cells, int **arr_ports, int *cell_types, int *main_port_connections) {
+  if (node == NULL) return -1;
+
+  if (node->token == DIGIT) {
+    return church_encode(arr_cells, arr_ports, cell_types, node->value);
+  } else if (node->token == PLUS) {
+    int left_cell_id = to_interaction_net(node->left, arr_cells, arr_ports, cell_types, main_port_connections);
+    int left_port = 0;
+    int right_cell_id = to_interaction_net(node->right, arr_cells, arr_ports, cell_types, main_port_connections);
+    int right_port = 0;
+
+    if (cell_types[left_cell_id] == SUM) {
+      left_port = 2;
+    }
+    if (cell_types[right_cell_id] == SUM) {
+      right_port = 2;
+    }
+
+    int sum = sum_cell(arr_cells, arr_ports, cell_types);
+    // linking here
+    link(arr_cells, arr_ports, cell_types, sum, 0, left_cell_id, left_port);
+    link(arr_cells, arr_ports, cell_types, sum, 1, right_cell_id, right_port);
+    return sum;
+  }
+  return -1;
+}
+
+// garbage function that goes away as well as main_port_conns
+void update_connections_and_cell_types(int **arr_cells, int **arr_ports, int *main_port_connections) {
+  for (int i = 0; i < cell_counter; i++) {
+      int *cell = arr_cells[i];
+      main_port_connections[i] = -1;
+      if (cell == NULL) continue;
+      // this way if net[c->ports[0]->connected_cell] main port should be = to i.
+      main_port_connections[i] = cell[0];
+    }
+}
+
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
     gpu_interactions = 0;
 
     const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
     ASTNode *ast = parse(in);
-    to_net(net, ast);
+    // to_net(net, ast);
     
+    // we will represent the net by two arrays of arrays of ints representing the cell connected_cell and connected_port
+    // one with main port connections (should be refactored later) and one with cell types for a given cell
+    // ay array[i] where i is the cell id should give out a cell info.
+    // we may pre-alloc an array of size MAX_CELLS and also pre_alloc MAX_CELLS cells.
+    int **arr_cells = (int **) malloc(MAX_CELLS * sizeof(int *));
+    int **arr_ports = (int **) malloc(MAX_CELLS * sizeof(int *));
     int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
     int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
-    
-    update_connections_and_cell_types(net, main_port_connections, cell_types);
-    for (int i = cell_counter; i < MAX_CELLS; i++) {
+  
+    for (int i = 0; i < MAX_CELLS; i++) {
+      arr_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+      arr_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
       cell_types[i] = -1;
+      main_port_connections[i] = -1;
     }
+
+    church_encode(arr_cells, arr_ports, cell_types, 3);
+
+    int value = church_decode(arr_cells, arr_ports, cell_types);
+    printf("decoded val is: %i\n", value);
+
+    // garbage goes away soon
+    update_connections_and_cell_types(arr_cells, arr_ports, main_port_connections);
 
     int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
     int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
@@ -775,7 +896,7 @@ int main() {
     Cell *gpu_net[MAX_CELLS] = {NULL};
     start = clock();
 
-    process(gpu_net, main_port_connections, cell_types, net, cell_conns, conn_rules);
+    process(arr_cells, arr_ports, gpu_net, main_port_connections, cell_types, net, cell_conns, conn_rules);
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
