@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CELLS 50
+#define MAX_CELLS 1000
 #define MAX_PORTS 5
 
 #define SUM 0

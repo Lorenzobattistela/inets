@@ -129,6 +129,7 @@ void free_ast(ASTNode *node) {
 // =============================================================
 
 static int cell_counter = 0;
+static int gpu_interactions = 0;
 
 Cell* create_cell(int cell_type, int num_aux_ports) {
     Cell *cell = (Cell*)malloc(sizeof(Cell));
@@ -190,39 +191,6 @@ void link(Cell **cells, int a, int a_idx, int b, int b_idx) {
     }
 }
 
-void suc_sum(Cell **cells, Cell *suc, Cell *s) {
-    Cell *new_suc = suc_cell(cells);
-    Port suc_first_aux = suc->ports[1];
-
-    link(cells, s->cell_id, 0, suc_first_aux.connected_cell, suc_first_aux.connected_port);
-    link(cells, new_suc->cell_id, 0, s->ports[2].connected_cell, s->ports[2].connected_port);
-    link(cells, new_suc->cell_id, 1, s->cell_id, 2);
-
-    delete_cell(cells, suc->cell_id);
-}
-
-void zero_sum(Cell **cells, Cell *zero, Cell *s) {
-    link(cells, s->ports[1].connected_cell, s->ports[1].connected_port, s->ports[2].connected_cell, s->ports[2].connected_port);
-    delete_cell(cells, zero->cell_id);
-    delete_cell(cells, s->cell_id);
-}
-
-int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
-    if (cell_a == NULL || cell_b == NULL) {
-        return 0;
-    }
-    int rule = cell_a->type + cell_b->type;
-
-    if (rule == SUC_SUM) {
-        *reduction_func = suc_sum;
-        return 1;
-    } else if (rule == ZERO_SUM) {
-        *reduction_func = zero_sum;
-        return 1;
-    }
-    return 0;
-}
-
 // ========================================== CUDa functions
 
 __device__ int create_cell_c(int **arr_net, int **arr_ports, int* cell_types, int cell_type, int *cell_count) {
@@ -263,14 +231,9 @@ __device__ void link_c(int **arr_net, int **arr_ports, int *cell_types, int a_id
     arr_net[b_id][b_port] = a_id;
     arr_ports[b_id][b_port] = a_port;
   }
-  printf("A (id = %i) cell type: %i\n", a_id, cell_types[a_id]);
-
-  printf("B (id = %i) cell type: %i\n", b_id, cell_types[b_id]);
-  printf("Connected cell %i from port %i to cell %i through port %i\n", a_id, a_port, b_id, b_port);
 }
 
 __device__ void delete_cell_c(int cell_id, int **arr_net, int **arr_ports, int *cell_types) {
-  printf("Deleting cell with id %i\n", cell_id);
   for (int i = 0; i < MAX_PORTS; i++) {
     arr_net[cell_id][i] = -1;
     arr_ports[cell_id][i] = -1;
@@ -289,7 +252,6 @@ __device__ void suc_sum_c(int **arr_net, int **arr_ports, int *cell_types, int s
 }
 
 __device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int zero, int s, int *cell_count) {
-  printf("performing a zero sum!");
   int sum_aux_first_connected_cell = arr_net[s][1];
   int sum_aux_first_connected_port = arr_ports[s][1];
 
@@ -302,7 +264,7 @@ __device__ void zero_sum_c(int **arr_net, int **arr_ports, int *cell_types, int 
 
 __device__ void update_connections_and_cell_types_c(int **arr_net, int **arr_ports, int *main_port_connections, int *cell_types) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx >= 3500) return;
+  if(idx >= MAX_CELLS) return;
 
   int *cell_net = arr_net[idx];
   int *cell_port = arr_ports[idx];
@@ -320,7 +282,6 @@ __global__ void reduce_kernel(int *cell_conns, int *cell_types, int *conn_rules,
   if (idx > MAX_CELLS) return;
 
   int conn = cell_conns[idx];
-  printf("Cell %i is connected trough main port with %i\n", idx, conn);
   int rule = conn_rules[idx];
 
   if (conn == -1) return;
@@ -341,16 +302,12 @@ __global__ void reduce_kernel(int *cell_conns, int *cell_types, int *conn_rules,
   }
 
   if (rule == SUC_SUM) {
-    printf("PERFORMING SUC SUM\n");
-    printf("IM A THREAD WITH IDX: %i\n", idx);
     if (a_type == SUM && b_type == SUC) {
       suc_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
     } else {
       suc_sum_c(arr_cell, arr_ports, cell_types, idx, conn, cell_count);
     }
   } else if (rule == ZERO_SUM) {
-    printf("PERFORMING ZERO SUM\n");
-    printf("IM A THREAD WITH IDX: %i\n", idx);
     if (a_type == SUM && b_type == ZERO) {
       zero_sum_c(arr_cell, arr_ports, cell_types, conn, idx, cell_count);
     } else {
@@ -450,7 +407,7 @@ Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
-  printf("First found is: %i\n", h_found);
+  gpu_interactions += h_found;
   // find reducible needs correct main_port_connections and cell_Types. Cell_conns and cell_rules are fresh
 
 
@@ -516,7 +473,6 @@ Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell
   
   int loop = 0;
   while (h_found > 0) {
-    // if (loop == 2) {exit(1);}
     loop++;
     // reduces already update d_arr_cells and d_arr_ports
     // we need to update the main_port connections 
@@ -565,8 +521,6 @@ Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell
     for(int i = 0; i < MAX_CELLS; i++) {
       int cell_t = cell_types[i];
       if (cell_t == -1) continue;
-      printf("cell %i type = ", i);
-      print_cell_type(cell_t);
     }
 
 
@@ -606,9 +560,8 @@ Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell
     err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
 
-    printf("h found is now set to: %i\n", h_found);
+    gpu_interactions += h_found;
     if (h_found == 0) {
-      // the problem with this is that piles up the nets
       from_gpu_to_net(gpu_net, h_result_cells, h_result_ports, cell_types);
     }
 
@@ -649,23 +602,6 @@ Cell **process(Cell** gpu_net, int *main_port_connections, int* cell_types, Cell
 // ==============================================================
 
 
-int find_reducible(Cell **cells, ReductionFunc *reduction_func, int *a_id, int *b_id) {
-    for (int i = 0; i < cell_counter; ++i) {
-        if (cells[i] == NULL) continue;
-        Cell *cell = cells[i];
-        Port main_port = cell->ports[0];
-
-        if (main_port.connected_port == 0) {
-            if (check_rule(cell, cells[main_port.connected_cell], reduction_func)) {
-                *a_id = cell->cell_id;
-                *b_id = main_port.connected_cell;
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
-
 int church_encode(Cell **net, int num) {
     Cell *zero = zero_cell(net);
     Cell *to_connect_cell = zero;
@@ -693,7 +629,6 @@ Cell* find_zero_cell(Cell **net) {
 
 int church_decode(Cell **net) {
     Cell *cell = find_zero_cell(net);
-    printf("Zero cell has id: %i\n", cell->cell_id);
     if (cell == NULL) {
         printf("Not a church encoded number net!\n");
         return -1;
@@ -702,14 +637,11 @@ int church_decode(Cell **net) {
     int val = 0;
 
     Port port = cell->ports[0];
-    printf("cell id: %i port connected to cell: %i\n", cell->cell_id, port.connected_cell);
 
     while (port.connected_cell != -1) {
         Cell *z = net[port.connected_cell];
-        printf("z null: %i\n", z == NULL);
         port = net[port.connected_cell]->ports[0];
         val++;
-        printf("cell id: %i port connected to cell: %i\n", z->cell_id, port.connected_cell);
     }
     return val;
 }
@@ -740,38 +672,6 @@ int to_net(Cell **net, ASTNode *node) {
     }
 
     return -1;
-}
-
-void reduce(Cell **net, int *cell_conns, int *conn_rules) {
-  for (int i = 0; i < cell_counter; i++) {
-    int conn = cell_conns[i];
-    int rule = conn_rules[i];
-    // no rule existent or already used
-    if (conn == -1) continue;
-
-    Cell *a = net[i];
-    Cell *b = net[conn];
-
-    if (a == NULL || b == NULL) {
-      continue;
-    }
-    
-    if (rule == SUC_SUM) {
-      if (a->type == SUM && b->type == SUC) {
-        suc_sum(net, b, a);
-      } else {
-        suc_sum(net, a, b);
-      }
-    } else if (rule == ZERO_SUM) {
-      if (a->type == SUM && b->type == ZERO) {
-        zero_sum(net, b, a);
-      } else {
-        zero_sum(net, a, b);
-      }
-    }
-    cell_conns[i] = -1;
-    cell_conns[conn] = -1;
-  }
 }
 
 void print_cell_type(int type) {
@@ -815,10 +715,6 @@ void from_gpu_to_net(Cell **net, int **h_result_cells, int **h_result_ports, int
     };
 
     Cell *c;
-
-    printf("Cell i=%i type: ", i);
-    print_cell_type(cell_type);
-
     if (cell_type == ZERO) {
       c = zero_cell(net);
     } else if(cell_type == SUM) {
@@ -830,7 +726,6 @@ void from_gpu_to_net(Cell **net, int **h_result_cells, int **h_result_ports, int
     Port *c_ports = (Port *)malloc(MAX_PORTS * sizeof(Port));
     for (int j = 0; j < c->num_aux_ports + 1; j++) {
       c_ports[j].connected_cell = cell[j];
-      printf("Port %i is connected to cell %i and port %i\n", j, cell[j], port[j]);
       c_ports[j].connected_port = port[j];
     }
     c->ports = c_ports;
@@ -841,8 +736,6 @@ void from_gpu_to_net(Cell **net, int **h_result_cells, int **h_result_ports, int
     if (c == NULL) {
       continue;
     }
-    print_cell_type(c->type);
-    printf("Cell %i with cell id %i\n", i, c->cell_id);
   }
 }
 
@@ -860,10 +753,10 @@ void update_connections_and_cell_types(Cell **net, int *main_port_connections, i
 
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
+    gpu_interactions = 0;
 
     const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
     ASTNode *ast = parse(in);
-    // print_ast(ast);
     to_net(net, ast);
     
     int *main_port_connections = (int *) malloc(MAX_CELLS * sizeof(int));
@@ -877,9 +770,6 @@ int main() {
     int *cell_conns = (int *) malloc(MAX_CELLS * sizeof(int));
     int *conn_rules = (int *) malloc(MAX_CELLS * sizeof(int));
 
-    int interactions = 0;
-    int reducible;
-
     clock_t start, end;
     double time_used;
     Cell *gpu_net[MAX_CELLS] = {NULL};
@@ -889,14 +779,13 @@ int main() {
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-    // double ips = (double)interactions / time_used;
-        // exit(1);
+    double ips = (double)gpu_interactions / time_used;
+
     int val = church_decode(gpu_net);
     printf("Decoded value: %d\n", val);
 
-
-    printf("The program took %f seconds to execute and made %i interactions.\n", time_used, interactions);
-    // printf("Interactions per second: %f\n", ips);
+    printf("The program took %f seconds to execute and made %i interactions.\n", time_used, gpu_interactions);
+    printf("Interactions per second: %f\n", ips);
     
     for (int i = 0; i < MAX_CELLS; ++i) {
       if (net[i] != NULL) {
