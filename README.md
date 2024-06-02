@@ -46,3 +46,8 @@ To process the whole net in the gpu, we'd have to generalize the kernel caller. 
 When I first tried to implement inets, I tried something a bit more expressive in terms of legibility (using more structs), but it turns out to be a lot more complicated and really slow. The implementation is at `old_approach/cell.c` and `unary_arithmetics.c`. Not really easy to make it parallel the way it was wrote. But it works.
 
 
+## Working version improvements
+- pre-alloc cells instead of alloc them everytime i create
+- instead of having my own "net structure" and convert it to arrays to process in the gpu, do it all with the same structure
+- valgrind to catch memory leaks
+- not alloc everything on MAX_CELLS for all arrays, doing cell_count
