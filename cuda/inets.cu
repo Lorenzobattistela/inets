@@ -861,7 +861,7 @@ void update_connections_and_cell_types(Cell **net, int *main_port_connections, i
 int main() {
     Cell *net[MAX_CELLS] = {NULL};
 
-    const char *in = "(2 + 2)";
+    const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
     ASTNode *ast = parse(in);
     // print_ast(ast);
     to_net(net, ast);
