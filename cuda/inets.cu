@@ -312,9 +312,12 @@ __device__ bool is_valid_rule(int rule) {
   cell_conns[idx] = -1;
   conn_rules[idx] = -1;
 
+  // int main_port_conn = arr_cells[idx][0];
+
   int main_port_conn = main_port_connections[idx];
   int a_cell_type = cell_types[idx];
 
+  // int connection_main = arr_cells[main_port_conn][0];
   int connection_main = main_port_connections[main_port_conn];
   int b_cell_type = cell_types[main_port_conn];
 
@@ -345,7 +348,7 @@ __device__ bool is_valid_rule(int rule) {
 }
 
 
-Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
+void process(int **arr_cells, int **arr_ports, int *main_port_connections, int* cell_types, Cell **net, int *cell_conns, int *conn_rules) {
   // =========================First Find Setup ==========================
 
   int *d_main_port_connections;
@@ -392,8 +395,8 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
   err = cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
   handle_cuda_error(err);
 
+
   gpu_interactions += h_found;
-  // find reducible needs correct main_port_connections and cell_Types. Cell_conns and cell_rules are fresh
 
 
   // ==========================Reduce Setup==============================
@@ -417,20 +420,18 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
     err = cudaMalloc(&h_arr_port[i], MAX_PORTS * sizeof(int));
     handle_cuda_error(err);
 
-    Cell *c = net[i];
     int* connected_cell = (int *) malloc(MAX_PORTS * sizeof(int));
     int* connected_port = (int *) malloc(MAX_PORTS * sizeof(int));
 
+    int *cell = arr_cells[i];
+    int *port = arr_ports[i];
     for (int j = 0; j < MAX_PORTS; j++) {
-      if (c == NULL) {
+      if (cell == NULL || port == NULL) {
         connected_cell[j] = -1;
         connected_port[j] = -1;
-      } else if (j < c->num_aux_ports + 1) {
-        connected_cell[j] = c->ports[j].connected_cell;
-        connected_port[j] = c->ports[j].connected_port;
       } else {
-        connected_cell[j] = -1;
-        connected_port[j] = -1;
+        connected_cell[j] = cell[j];
+        connected_port[j] = port[j];
       }
     }
     
@@ -494,10 +495,10 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
     err = cudaMemcpy(d_result_ports, d_arr_ports, MAX_CELLS * sizeof(int *), cudaMemcpyDeviceToDevice);
     handle_cuda_error(err);
     for (int i = 0; i < MAX_CELLS; i++) {
-        err = cudaMemcpy(h_result_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(arr_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
         handle_cuda_error(err);
 
-        err = cudaMemcpy(h_result_ports[i], h_arr_port[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(arr_ports[i], h_arr_port[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
         handle_cuda_error(err);
     }
     err = cudaMemcpy(cell_types, d_cell_types, MAX_CELLS * sizeof(int), cudaMemcpyDeviceToHost);
@@ -511,7 +512,7 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
 
     // build up new main_port connections
     for (int i = 0; i < MAX_CELLS; i++) {
-      main_port_connections[i] = h_result_cells[i][0];
+      main_port_connections[i] = arr_cells[i][0];
     }
 
     // prepare find kernel
@@ -546,9 +547,6 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
     handle_cuda_error(err);
 
     gpu_interactions += h_found;
-    if (h_found == 0) {
-      from_gpu_to_net(gpu_net, h_result_cells, h_result_ports, cell_types);
-    }
 
     err = cudaMemcpy(cell_conns, d_cell_conns, port_conns_size, cudaMemcpyDeviceToHost);
     handle_cuda_error(err);
@@ -581,8 +579,6 @@ Cell **process(int **arr_cells, int **arr_ports, Cell** gpu_net, int *main_port_
   cudaFree(d_arr_cells);
   cudaFree(d_arr_ports);
   cudaFree(d_cell_count);
-
-  return gpu_net;
 }
 // ==============================================================
 
@@ -860,7 +856,7 @@ int main() {
     Cell *net[MAX_CELLS] = {NULL};
     gpu_interactions = 0;
 
-    const char *in = "((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))";
+    const char *in = "1 + 1";
     ASTNode *ast = parse(in);
     // to_net(net, ast);
     
@@ -880,10 +876,7 @@ int main() {
       main_port_connections[i] = -1;
     }
 
-    church_encode(arr_cells, arr_ports, cell_types, 3);
-
-    int value = church_decode(arr_cells, arr_ports, cell_types);
-    printf("decoded val is: %i\n", value);
+    to_interaction_net(ast, arr_cells, arr_ports, cell_types, main_port_connections);
 
     // garbage goes away soon
     update_connections_and_cell_types(arr_cells, arr_ports, main_port_connections);
@@ -893,26 +886,21 @@ int main() {
 
     clock_t start, end;
     double time_used;
-    Cell *gpu_net[MAX_CELLS] = {NULL};
+  
     start = clock();
 
-    process(arr_cells, arr_ports, gpu_net, main_port_connections, cell_types, net, cell_conns, conn_rules);
+    process(arr_cells, arr_ports, main_port_connections, cell_types, net, cell_conns, conn_rules);
     end = clock();
 
     time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
     double ips = (double)gpu_interactions / time_used;
 
-    int val = church_decode(gpu_net);
-    printf("Decoded value: %d\n", val);
+    int value = church_decode(arr_cells, arr_ports, cell_types);
+    printf("decoded val is: %i\n", value);
 
     printf("The program took %f seconds to execute and made %i interactions.\n", time_used, gpu_interactions);
     printf("Interactions per second: %f\n", ips);
     
-    for (int i = 0; i < MAX_CELLS; ++i) {
-      if (net[i] != NULL) {
-          delete_cell(net, i);
-      }
-    }
     free_ast(ast);
 
     return 0;   
