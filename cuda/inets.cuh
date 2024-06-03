@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CELLS 1000
-#define MAX_PORTS 5
+#define MAX_CELLS 5000
+#define MAX_PORTS 3
 
 #define SUM 0
 #define SUC 1
@@ -67,7 +67,8 @@ int church_encode(Cell **net, int num);
 Cell* find_zero_cell(Cell **net);
 int church_decode(Cell **net);
 int to_net(Cell **net, ASTNode *node);
-void from_gpu_to_net(Cell **net, int **h_result_cells, int **h_result_ports, int *cell_types);
 
 void print_cell_type(int type);
 void update_connections_and_cell_types(Cell **net, int *main_port_connections, int *cell_types);
+void print_net(int **arr_cells, int **arr_ports, int *cell_types);
+int stress_test(char *in, int expected, int times);

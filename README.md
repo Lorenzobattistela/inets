@@ -51,3 +51,4 @@ When I first tried to implement inets, I tried something a bit more expressive i
 - instead of having my own "net structure" and convert it to arrays to process in the gpu, do it all with the same structure
 - valgrind to catch memory leaks
 - not alloc everything on MAX_CELLS for all arrays, doing cell_count
+- link should be atomic. Same program giving different results arbitrairly
