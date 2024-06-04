@@ -4,6 +4,7 @@
 #include "parser.h"
 
 #define MAX_CELLS 35000
+#define MAX_PORTS 3
 
 #define SUM 0
 #define SUC 1
@@ -26,225 +27,336 @@ typedef struct {
 
 static int cell_counter = 0;
 
-Cell* create_cell(int cell_type, int num_aux_ports) {
-    Cell *cell = (Cell*)malloc(sizeof(Cell));
-    cell->cell_id = cell_counter++;
-    cell->type = cell_type;
-    cell->num_aux_ports = num_aux_ports;
-    cell->ports = (Port*)malloc((num_aux_ports + 1) * sizeof(Port)); // +1 for the main port
-    for (int i = 0; i < num_aux_ports + 1; ++i) {
-        cell->ports[i].connected_cell = -1;
-        cell->ports[i].connected_port = -1;
+void print_cell_type(int type) {
+  switch (type) {
+    case ZERO:
+      printf("ZERO");
+      break;
+    case SUM:
+      printf("SUM");
+      break;
+    case SUC:
+      printf("SUC");
+      break;
+    default:
+      printf("Invalid cell type\n");
+      break;
+  }
+  printf("\n");
+}
+
+bool is_null_cell(int *cell, int *port) {
+  for (int i = 0; i < MAX_PORTS; i++) {
+    if (cell[i] != -1) {
+      return false;
     }
-    return cell;
+  }
+  return true;
 }
 
-void delete_cell(Cell **cells, int cell_id) {
-    free(cells[cell_id]->ports);
-    free(cells[cell_id]);
-    cells[cell_id] = NULL;
-}
-
-void add_to_net(Cell **net, Cell *cell) {
-    net[cell->cell_id] = cell;
-}
-
-Cell* zero_cell(Cell **net) {
-    Cell *c = create_cell(ZERO, 0);
-    add_to_net(net, c);
-    return c;
-}
-
-Cell* suc_cell(Cell **net) {
-    Cell *c = create_cell(SUC, 1);
-    add_to_net(net, c);
-    return c;
-}
-
-Cell* sum_cell(Cell **net) {
-    Cell *c = create_cell(SUM, 2);
-    add_to_net(net, c);
-    return c;
-}
-
-void link(Cell **cells, int a, int a_idx, int b, int b_idx) {
-    if (a == -1 && b != -1) {
-        cells[b]->ports[b_idx].connected_cell = -1;
-        cells[b]->ports[b_idx].connected_port = -1;
-    } else if (a != -1 && b == -1) {
-        cells[a]->ports[a_idx].connected_cell = -1;
-        cells[a]->ports[a_idx].connected_port = -1;
-    } else {
-        cells[a]->ports[a_idx].connected_cell = b;
-        cells[a]->ports[a_idx].connected_port = b_idx;
-        cells[b]->ports[b_idx].connected_cell = a;
-        cells[b]->ports[b_idx].connected_port = a_idx;
+void delete_cell(int cell_id, int **arr_net, int **arr_ports, int *cell_types) {
+    for (int i = 0; i < MAX_PORTS; i++) {
+        arr_net[cell_id][i] = -1;
+        arr_ports[cell_id][i] = -1;
     }
+    cell_types[cell_id] = -1;
 }
 
-void suc_sum(Cell **cells, Cell *suc, Cell *s) {
-    Cell *new_suc = suc_cell(cells);
-    Port suc_first_aux = suc->ports[1];
-
-    link(cells, s->cell_id, 0, suc_first_aux.connected_cell, suc_first_aux.connected_port);
-    link(cells, new_suc->cell_id, 0, s->ports[2].connected_cell, s->ports[2].connected_port);
-    link(cells, new_suc->cell_id, 1, s->cell_id, 2);
-
-    delete_cell(cells, suc->cell_id);
+int create_cell(int **arr_net, int **arr_ports, int* cell_types, int cell_type) {
+  int cell_id = cell_counter++;
+  cell_types[cell_id] = cell_type;
+  for (int i = 0; i < MAX_PORTS; i++) {
+    arr_net[cell_id][i] = -1;
+    arr_ports[cell_id][i] = -1;
+  }
+  return cell_id;
 }
 
-void zero_sum(Cell **cells, Cell *zero, Cell *s) {
-    link(cells, s->ports[1].connected_cell, s->ports[1].connected_port, s->ports[2].connected_cell, s->ports[2].connected_port);
-    delete_cell(cells, zero->cell_id);
-    delete_cell(cells, s->cell_id);
+int zero_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, ZERO);
+  return cell_id;
 }
 
-typedef void (*ReductionFunc)(Cell **, Cell *, Cell *);
-
-int check_rule(Cell *cell_a, Cell *cell_b, ReductionFunc *reduction_func) {
-    if (cell_a == NULL || cell_b == NULL) {
-        return 0;
-    }
-    int rule = cell_a->type + cell_b->type;
-
-    if (rule == SUC_SUM) {
-        *reduction_func = suc_sum;
-        return 1;
-    } else if (rule == ZERO_SUM) {
-        *reduction_func = zero_sum;
-        return 1;
-    }
-    return 0;
+int suc_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUC);
+  return cell_id;
 }
 
-int find_reducible(Cell **cells, ReductionFunc *reduction_func, int *a_id, int *b_id) {
-    for (int i = 0; i < cell_counter; ++i) {
-        if (cells[i] == NULL) continue;
-        Cell *cell = cells[i];
-        Port main_port = cell->ports[0];
+int sum_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUM);
+  return cell_id;
+}
 
-        if (main_port.connected_port == 0) {
-            if (check_rule(cell, cells[main_port.connected_cell], reduction_func)) {
-                *a_id = cell->cell_id;
-                *b_id = main_port.connected_cell;
-                return 1;
+
+void link(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port, int b_id, int b_port) {
+  if (a_id == -1 && b_id != -1) {
+    arr_net[b_id][b_port] = -1;
+    arr_ports[b_id][b_port] = -1;
+  } else if (a_id != -1 && b_id == -1) {
+    arr_net[a_id][a_port] = -1;
+    arr_ports[a_id][a_port] = -1;
+  } else {
+    arr_net[a_id][a_port] = b_id; 
+    arr_ports[a_id][a_port] = b_port;
+    arr_net[b_id][b_port] = a_id;
+    arr_ports[b_id][b_port] = a_port;
+  }
+}
+
+void suc_sum(int **arr_net, int **arr_ports, int *cell_types, int suc, int s) {
+  int new_suc = suc_cell(arr_net, arr_ports, cell_types);
+
+  int suc_first_aux_cell = arr_net[suc][1];
+  int suc_first_aux_ports = arr_ports[suc][1];
+
+  link(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
+  link(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
+  link(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
+  delete_cell(suc, arr_net, arr_ports, cell_types);
+
+}
+
+void zero_sum(int **arr_net, int **arr_ports, int *cell_types, int zero, int s) {
+  int sum_aux_first_connected_cell = arr_net[s][1];
+  int sum_aux_first_connected_port = arr_ports[s][1];
+
+  int sum_aux_snd_connected_cell = arr_net[s][2];
+  int sum_aux_snd_connected_port = arr_ports[s][2];
+
+  link(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell, sum_aux_first_connected_port, sum_aux_snd_connected_cell, sum_aux_snd_connected_port);
+  delete_cell(zero, arr_net, arr_ports, cell_types);
+  delete_cell(s, arr_net, arr_ports, cell_types);
+}
+
+void reduce(int *cell_conns, int *cell_types, int *conn_rules, int **arr_cell, int **arr_ports) {
+    for (int i = 0; i < cell_counter; i++) {
+        int conn = cell_conns[i];
+        if (conn == -1) continue;
+
+        int rule = conn_rules[i];
+
+        int *a_connected_cell = arr_cell[i];
+        int *a_connected_port = arr_ports[i];
+        int a_type = cell_types[i];
+
+        int *b_connected_cell = arr_cell[conn];
+        int *b_connected_port = arr_ports[conn];
+        int b_type = cell_types[conn];
+
+        if (a_connected_cell == NULL || a_connected_port == NULL || b_connected_cell == NULL || b_connected_port == NULL || cell_types[i] == -1 || cell_types[conn] == -1) {
+            continue;
+        }
+
+        if (rule == SUC_SUM) {
+            if (a_type == SUM && b_type == SUC) {
+            suc_sum(arr_cell, arr_ports, cell_types, conn, i);
+            } else {
+            suc_sum(arr_cell, arr_ports, cell_types, i, conn);
+            }
+        } else if (rule == ZERO_SUM) {
+            if (a_type == SUM && b_type == ZERO) {
+            zero_sum(arr_cell, arr_ports, cell_types, conn, i);
+            } else {
+            zero_sum(arr_cell, arr_ports, cell_types, i, conn);
             }
         }
     }
-    return 0;
 }
 
-int church_encode(Cell **net, int num) {
-    Cell *zero = zero_cell(net);
-    Cell *to_connect_cell = zero;
-    int to_connect_port = 0;
+int church_encode(int **arr_cells, int **arr_ports, int *cell_types, int num) {
+  int zero = zero_cell(arr_cells, arr_ports, cell_types);
+  int to_connect_cell = zero;
+  int to_connect_port = 0;
 
-    for (int i = 0; i < num; ++i) {
-        Cell *suc = suc_cell(net);
-        link(net, suc->cell_id, 1, to_connect_cell->cell_id, to_connect_port);
-        to_connect_cell = suc;
-        to_connect_port = 0;
-    }
-    return to_connect_cell->cell_id;
+  for (int i = 0; i < num; i++) {
+    int suc = suc_cell(arr_cells, arr_ports, cell_types);
+    link(arr_cells, arr_ports, cell_types, suc, 1, to_connect_cell, to_connect_port);
+    to_connect_cell = suc;
+    to_connect_port = 0;
+  }
+  return to_connect_cell;
 }
 
-Cell* find_zero_cell(Cell **net) {
-    for (int i = 0; i < cell_counter; ++i) {
-        if (net[i] != NULL && net[i]->type == ZERO) {
-            return net[i];
-        }
+int find_zero_cell(int *cell_types) {
+  for (int i = 0; i < MAX_CELLS; i++) {
+    int type = cell_types[i];
+    if (type == ZERO) {
+      return i;
     }
-    return NULL;
+  }
+  return -1;
 }
 
-int church_decode(Cell **net) {
-    Cell *cell = find_zero_cell(net);
-    if (!cell) {
-        printf("Not a church encoded number net!\n");
-        return -1;
-    }
-
-    int val = 0;
-
-    Port port = cell->ports[0];
-
-    while (port.connected_cell != -1) {
-        port = net[port.connected_cell]->ports[0];
-        val++;
-    }
-    return val;
-}
-
-int to_net(Cell **net, ASTNode *node) {
-    if (!node) return -1;
-
-    if (node->token == DIGIT) {
-        return church_encode(net, node->value);
-    } else if (node->token == PLUS) {
-        int left_cell_id = to_net(net, node->left);
-        int left_port = 0;
-        int right_cell_id = to_net(net, node->right);
-        int right_port = 0;
-        Cell *sum = sum_cell(net);
-
-        if (net[left_cell_id]->type == SUM) {
-            left_port = 2;
-        }
-
-        if (net[right_cell_id]->type == SUM) {
-            right_port = 2;
-        }
-
-        link(net, sum->cell_id, 0, left_cell_id, left_port);
-        link(net, sum->cell_id, 1, right_cell_id, right_port);
-        return sum->cell_id;
-    }
-
+int church_decode(int **arr_cells, int **arr_ports, int *cell_types) {
+  int zero = find_zero_cell(cell_types);
+  if (zero == -1) {
+    printf("Not a church encoded number net!\n");
     return -1;
+  }
+
+  int val = 0;
+
+  int port_connected_cell = arr_cells[zero][0];
+
+  while (port_connected_cell != -1) {
+    port_connected_cell = arr_cells[port_connected_cell][0];
+    val++;
+  }
+  return val;
+}
+
+int to_interaction_net(ASTNode *node, int **arr_cells, int **arr_ports, int *cell_types) {
+  if (node == NULL) return -1;
+
+  if (node->token == DIGIT) {
+    return church_encode(arr_cells, arr_ports, cell_types, node->value);
+  } else if (node->token == PLUS) {
+    int left_cell_id = to_interaction_net(node->left, arr_cells, arr_ports, cell_types);
+    int left_port = 0;
+    int right_cell_id = to_interaction_net(node->right, arr_cells, arr_ports, cell_types);
+    int right_port = 0;
+
+    if (cell_types[left_cell_id] == SUM) {
+      left_port = 2;
+    }
+    if (cell_types[right_cell_id] == SUM) {
+      right_port = 2;
+    }
+
+    int sum = sum_cell(arr_cells, arr_ports, cell_types);
+    // linking here
+    link(arr_cells, arr_ports, cell_types, sum, 0, left_cell_id, left_port);
+    link(arr_cells, arr_ports, cell_types, sum, 1, right_cell_id, right_port);
+    return sum;
+  }
+  return -1;
+}
+
+void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
+  printf("\nNET (\n");
+  for (int i = 0; i < MAX_CELLS; i++) {
+    int type = cell_types[i];
+    int *cell = arr_cells[i];
+    int *port = arr_ports[i];
+
+    if (type == -1 || cell == NULL || port == NULL) {
+      continue;
+    }
+    printf("Cell %i ", i);
+    print_cell_type(type);
+    printf("ports label: [id](connected_cell, connected_port)\n");
+    printf("PORTS: (");
+    for (int j = 0; j < MAX_PORTS; j++) {
+      if (cell[j] == -1 || port[j] == -1) {
+        continue;
+      }
+      printf("[%i] (%i, %i)  ", j, cell[j], port[j]);
+    }
+    printf("))\n");
+  }
+}
+
+bool is_valid_rule (int rule) {
+    return (rule == SUC_SUM) || (rule == ZERO_SUM);
+}
+
+int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns, int *cell_types, int *conn_rules) {
+    int found = 0;
+    for (int i = 0; i < cell_counter; i++) {
+        cell_conns[i] = -1;
+        conn_rules[i] = -1;
+
+        int *main_port = arr_cells[i];
+        if (main_port == NULL) {
+            continue;
+        }
+        int main_port_conn = main_port[0];
+        if (main_port_conn == -1) {
+            continue;
+        }
+
+        int *connection_port = arr_cells[main_port_conn];
+        if (connection_port == NULL) {
+            continue;
+        }
+        int connection_main = connection_port[0];
+        
+        if (cell_types[i] == -1 || cell_types[main_port_conn] == -1) {
+            continue;
+        }
+
+        int rule = cell_types[i] + cell_types[main_port_conn];
+
+        if(!is_valid_rule(rule)) {
+            continue;
+        }
+
+        if (connection_main != i) {
+            continue;
+        }
+
+        if (i > main_port_conn) {
+            continue;
+        }
+        cell_conns[i] = main_port_conn;
+        conn_rules[i] = rule;
+        found++;
+    }
+    return found;
 }
 
 int main() {
-    Cell *net[MAX_CELLS] = {NULL};
-    const char *in = "((1000 + 1000) + (1000 + 1000))";
+    const char *in = "(100 + 100) + (100 + 100)";
     ASTNode *ast = parse(in);
-    // print_ast(ast);
-    to_net(net, ast);
 
-    ReductionFunc reduce_function;
-    int a_id, b_id;
+    int **arr_cells = (int **) malloc(MAX_CELLS * sizeof(int *));
+    int **arr_ports = (int **) malloc(MAX_CELLS * sizeof(int *));
+    int *cell_types =(int *) malloc(MAX_CELLS * sizeof(int));
+    int *cell_conns =(int *) malloc(MAX_CELLS * sizeof(int));
+    int *conn_rules =(int *) malloc(MAX_CELLS * sizeof(int));
+  
+    for (int i = 0; i < MAX_CELLS; i++) {
+      arr_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+      arr_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
+      cell_types[i] = -1;
+      for (int j = 0; j < MAX_PORTS; j++) {
+        arr_cells[i][j] = -1;
+        arr_ports[i][j] = -1;
+      }
+    }
+    // print_ast(ast);
+    to_interaction_net(ast, arr_cells, arr_ports, cell_types);
+    int interactions = 0;
 
     clock_t start, end;
     double cpu_time_used;
 
+    int reductions = find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules);
     start = clock();
-    int interactions = 0;
-    while(find_reducible(net, &reduce_function, &a_id, &b_id)) {
-        if(net[a_id]->type == SUM && net[b_id]->type == SUC) {
-            reduce_function(net, net[b_id], net[a_id]);
-        } else if (net[a_id]->type == SUM && net[b_id]->type == ZERO) {
-            reduce_function(net, net[b_id], net[a_id]);
-        } else {
-            reduce_function(net, net[a_id], net[b_id]);
-        }
+    
+    while (reductions > 0) {
+        reduce(cell_conns, cell_types, conn_rules, arr_cells, arr_ports);
         interactions++;
+
+        reductions = find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules);
     }
     end = clock();
-
     cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
     double ips = (double)interactions / cpu_time_used;
 
-    int val = church_decode(net);
+    int val = church_decode(arr_cells, arr_ports, cell_types);
     printf("Decoded value: %d\n", val);
-
 
     printf("The program took %f seconds to execute and made %i interactions.\n", cpu_time_used, interactions);
     printf("Interactions per second: %f\n", ips);
     
-    for (int i = 0; i < MAX_CELLS; ++i) {
-        if (net[i] != NULL) {
-            delete_cell(net, i);
-        }
-    }
     free_ast(ast);
+    for (int i = 0; i < MAX_CELLS; i++) {
+      free(arr_cells[i]);
+      free(arr_ports[i]);
+    }
+    free(cell_types);
+    free(arr_cells);
+    free(arr_ports);
     return 0;   
 }
