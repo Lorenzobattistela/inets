@@ -309,7 +309,7 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns, int *cell_
 }
 
 int main() {
-    const char *in = "(((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1)))" ;
+    const char *in = "(((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + 1" ;
 
     ASTNode *ast = parse(in);
 
@@ -323,6 +323,8 @@ int main() {
       arr_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
       arr_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
       cell_types[i] = -1;
+      cell_conns[i] = -1;
+      conn_rules[i] = -1;
       for (int j = 0; j < MAX_PORTS; j++) {
         arr_cells[i][j] = -1;
         arr_ports[i][j] = -1;
@@ -357,6 +359,8 @@ int main() {
       free(arr_cells[i]);
       free(arr_ports[i]);
     }
+    free(cell_conns);
+    free(conn_rules);
     free(cell_types);
     free(arr_cells);
     free(arr_ports);
