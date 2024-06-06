@@ -2,7 +2,7 @@
 CC = gcc
 
 # Compiler flags
-CFLAGS = -Wall -O2
+CFLAGS = -I. -Wall -O3 -march=native -mtune=native -ffast-math -funroll-loops
 
 # Directories
 SRC_DIR = .

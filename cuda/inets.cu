@@ -568,7 +568,7 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 
 int main() {
     gpu_interactions = 0;
-    const char *in = "((10 + 10) + (10 + 10)) + ((10 + 10) + (10 + 10)) + 1" ;
+    const char *in = "(10 + 20) + (30 + 40)" ;
 
     ASTNode *ast = parse(in);
     // print_ast(ast);

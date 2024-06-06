@@ -19,7 +19,7 @@ $(EXECUTABLE): $(CUDA_OBJECTS) $(C_OBJECTS)
 
 # CUDA compilation step
 %.o: %.cu
-	$(NVCC) -c $< -o $@
+	$(NVCC) -c $< -o $@ -arch=sm_75 -O3 -use_fast_math
 
 # C compilation step
 %.o: %.c

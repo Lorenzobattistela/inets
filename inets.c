@@ -309,7 +309,7 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns, int *cell_
 }
 
 int main() {
-    const char *in = "(((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + 1" ;
+    const char *in = "(((1 + 10) + (9 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + 1" ;
 
     ASTNode *ast = parse(in);
 
