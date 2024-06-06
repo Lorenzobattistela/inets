@@ -26,6 +26,7 @@ typedef struct {
 } Cell;
 
 static int cell_counter = 0;
+static int interactions = 0;
 
 void print_cell_type(int type) {
   switch (type) {
@@ -110,9 +111,10 @@ void suc_sum(int **arr_net, int **arr_ports, int *cell_types, int suc, int s) {
   int suc_first_aux_ports = arr_ports[suc][1];
 
   link(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell, suc_first_aux_ports);
-  link(arr_net, arr_ports, cell_types, new_suc, 0, arr_net[s][2], arr_ports[s][2]);
-  link(arr_net, arr_ports, cell_types, new_suc, 1, s, 2);
+  link(arr_net, arr_ports, cell_types, new_suc, 1, arr_net[s][1], arr_ports[s][1]);
+  link(arr_net, arr_ports, cell_types, new_suc, 0, s, 1);
   delete_cell(suc, arr_net, arr_ports, cell_types);
+  interactions++;
 
 }
 
@@ -126,6 +128,7 @@ void zero_sum(int **arr_net, int **arr_ports, int *cell_types, int zero, int s) 
   link(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell, sum_aux_first_connected_port, sum_aux_snd_connected_cell, sum_aux_snd_connected_port);
   delete_cell(zero, arr_net, arr_ports, cell_types);
   delete_cell(s, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 void reduce(int *cell_conns, int *cell_types, int *conn_rules, int **arr_cell, int **arr_ports) {
@@ -149,15 +152,15 @@ void reduce(int *cell_conns, int *cell_types, int *conn_rules, int **arr_cell, i
 
         if (rule == SUC_SUM) {
             if (a_type == SUM && b_type == SUC) {
-            suc_sum(arr_cell, arr_ports, cell_types, conn, i);
+              suc_sum(arr_cell, arr_ports, cell_types, conn, i);
             } else {
-            suc_sum(arr_cell, arr_ports, cell_types, i, conn);
+              suc_sum(arr_cell, arr_ports, cell_types, i, conn);
             }
         } else if (rule == ZERO_SUM) {
             if (a_type == SUM && b_type == ZERO) {
-            zero_sum(arr_cell, arr_ports, cell_types, conn, i);
+              zero_sum(arr_cell, arr_ports, cell_types, conn, i);
             } else {
-            zero_sum(arr_cell, arr_ports, cell_types, i, conn);
+              zero_sum(arr_cell, arr_ports, cell_types, i, conn);
             }
         }
     }
@@ -306,7 +309,8 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns, int *cell_
 }
 
 int main() {
-    const char *in = "(100 + 100) + (100 + 100)";
+    const char *in = "(((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + (1 + 1)) + ((1 + 1) + (1 + 1)))" ;
+
     ASTNode *ast = parse(in);
 
     int **arr_cells = (int **) malloc(MAX_CELLS * sizeof(int *));
@@ -326,7 +330,7 @@ int main() {
     }
     // print_ast(ast);
     to_interaction_net(ast, arr_cells, arr_ports, cell_types);
-    int interactions = 0;
+    interactions = 0;
 
     clock_t start, end;
     double cpu_time_used;
@@ -336,8 +340,6 @@ int main() {
     
     while (reductions > 0) {
         reduce(cell_conns, cell_types, conn_rules, arr_cells, arr_ports);
-        interactions++;
-
         reductions = find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules);
     }
     end = clock();
