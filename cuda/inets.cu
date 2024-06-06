@@ -129,7 +129,7 @@ void free_ast(ASTNode *node) {
 
 // =============================================================
 
-static int cell_counter = 0;
+int cell_counter = 0;
 static int gpu_interactions = 0;
 
 
@@ -226,6 +226,7 @@ __global__ void reduce_kernel(int *cell_types, int **arr_cell, int **arr_ports) 
   if (a == NULL) return;
 
   int a_connected = arr_cell[idx][0];
+  if (a_connected == -1) return;
 
   int *b = arr_cell[a_connected];
   if (b == NULL) return;
@@ -334,7 +335,8 @@ void process(int **arr_cells, int **arr_ports, int *cell_types) {
   handle_cuda_error(err);
   cudaMemset(d_found, 0, sizeof(int));
 
-  cudaMemcpyToSymbol(cell_counter_c, &cell_counter, sizeof(int));
+  err = cudaMemcpyToSymbol(cell_counter_c, &cell_counter, sizeof(int));
+  handle_cuda_error(err);
 
   int threadsPerBlock = MAX_CELLS;
   int blocksPerGrid = 1;
@@ -346,20 +348,37 @@ void process(int **arr_cells, int **arr_ports, int *cell_types) {
     blocksPerGrid = (MAX_CELLS + maxThreadsPerBlock - 1) / maxThreadsPerBlock;
     threadsPerBlock = maxThreadsPerBlock;
   }
+  int zero = 0;
 
   // ==========================Reduce Setup==============================
   h_found = 1;
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  cudaEventRecord(start);
   while (h_found > 0) {
-    cudaMemcpyToSymbol(to_reduce, 0, sizeof(int));
+    err = cudaMemcpyToSymbol(to_reduce, &zero, sizeof(int));
+    handle_cuda_error(err);
 
     reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_cell_types, d_arr_cells, d_arr_ports);
 
     cudaDeviceSynchronize();
 
-    cudaMemcpyFromSymbol(&h_found, to_reduce, sizeof(int));
+    err = cudaMemcpyFromSymbol(&h_found, to_reduce, sizeof(int));
+    handle_cuda_error(err);
 
     gpu_interactions += h_found;
   }
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  
+  float seconds = milliseconds / 1000.0;
+  printf("GPU elapsed time (s): %f\n", seconds);
+  printf("Interactions per second (without setup): %f\n", gpu_interactions / seconds);
+
 
   for (int i = 0; i < MAX_CELLS; i++) {
     err = cudaMemcpy(arr_cells[i], h_arr_cell[i], MAX_PORTS * sizeof(int), cudaMemcpyDeviceToHost);
@@ -373,15 +392,12 @@ void process(int **arr_cells, int **arr_ports, int *cell_types) {
 
   // FREEING MEMORY
   for (int i = 0; i < MAX_CELLS; i++) {
-      cudaFree(h_arr_cell[i]);
-      cudaFree(h_arr_port[i]);
+      err = cudaFree(h_arr_cell[i]);
+      handle_cuda_error(err);
+      err = cudaFree(h_arr_port[i]);
+      handle_cuda_error(err);
   }
-  for (int i = 0; i < MAX_CELLS; ++i) {
-    cudaFree(h_arr_cell[i]);
-    cudaFree(h_arr_port[i]);
-  }
-  cudaFree(h_arr_cell);
-  cudaFree(h_arr_port);
+
   cudaFree(d_cell_types);
   cudaFree(d_found);
   cudaFree(d_arr_cells);
@@ -552,7 +568,7 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 
 int main() {
     gpu_interactions = 0;
-    const char *in = "((10 + 10) + (10 + 10)) + ((10 + 10) + (10 + 10))" ;
+    const char *in = "((10 + 10) + (10 + 10)) + ((10 + 10) + (10 + 10)) + 1" ;
 
     ASTNode *ast = parse(in);
     // print_ast(ast);
@@ -577,25 +593,10 @@ int main() {
 
     to_interaction_net(ast, arr_cells, arr_ports, cell_types);
 
-    clock_t start, end;
-    double time_used;
-  
-    start = clock();
-
     process(arr_cells, arr_ports, cell_types);
 
-    end = clock();
-
-    time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-    double ips = (double) gpu_interactions / time_used;
-
-    int value = church_decode(arr_cells, arr_ports, cell_types);
-    printf("decoded val is: %i\n", value);
-
-    printf("The program took %f seconds to execute and made %i interactions.\n", time_used, gpu_interactions);
-    printf("Interactions per second: %f\n", ips);
-
-    // print_net(arr_cells, arr_ports, cell_types);
+    int val = church_decode(arr_cells, arr_ports, cell_types);
+    printf("Decoded value is %i\n", val);
     
     free_ast(ast);
     for (int i = 0; i < MAX_CELLS; i++) {
