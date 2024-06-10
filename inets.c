@@ -217,6 +217,104 @@ void zero_sum(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
   interactions++;
 }
 
+void suc_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+             int suc, int mul) {
+
+  int sum_c = sum_cell(arr_net, arr_ports, cell_types);
+  int dup = dup_cell(arr_net, arr_ports, cell_types);
+
+  // link main port of mul to what was connected to suc aux
+  link(arr_net, arr_ports, redexes, cell_types, mul, 0, arr_net[suc][1],
+       arr_ports[suc][1]);
+
+  // link main port of dup to what was connected to mul 1st aux
+  link(arr_net, arr_ports, redexes, cell_types, dup, 0, arr_net[mul][1],
+       arr_ports[mul][1]);
+
+  // link mul 1st aux to dup 2nd aux
+  link(arr_net, arr_ports, redexes, cell_types, mul, 1, dup, 2);
+
+  // link sum 2nd aux to what was connected to mul 2nd aux
+  link(arr_net, arr_ports, redexes, cell_types, sum_c, 2, arr_net[mul][2],
+       arr_ports[mul][2]);
+
+  // link  sum main port to mul 2nd aux
+  link(arr_net, arr_ports, redexes, cell_types, sum_c, 0, mul, 2);
+
+  // link sum 1st aux to dup 1st aux
+  link(arr_net, arr_ports, redexes, cell_types, sum_c, 1, dup, 1);
+
+  delete_cell(suc, arr_net, arr_ports, cell_types);
+}
+
+void zero_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+              int zero, int mul) {
+  int era = era_cell(arr_net, arr_ports, cell_types);
+
+  // link era main port to mul 1st aux
+  link(arr_net, arr_ports, redexes, cell_types, era, 0, mul, 1);
+
+  // link zero main port to mul snd aux
+  link(arr_net, arr_ports, redexes, cell_types, zero, 0, mul, 2);
+
+  delete_cell(mul, arr_net, arr_ports, cell_types);
+}
+
+void suc_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+             int suc, int dup) {
+
+  int new_suc = suc_cell(arr_net, arr_ports, cell_types);
+
+  // link dup main to what was connected to suc aux
+  link(arr_net, arr_ports, redexes, cell_types, dup, 0, arr_net[suc][1],
+       arr_ports[suc][1]);
+
+  // link suc main to what was connected to dup first aux
+  link(arr_net, arr_ports, redexes, cell_types, suc, 0, arr_net[dup][1],
+       arr_ports[dup][1]);
+
+  // link suc 1st aux to dup 1st aux
+  link(arr_net, arr_ports, redexes, cell_types, suc, 1, dup, 1);
+
+  // link new suc main to what was connected to dup snd aux
+  link(arr_net, arr_ports, redexes, cell_types, new_suc, 0, arr_net[dup][2],
+       arr_ports[dup][2]);
+
+  // link new suc first aux to dup 2nd aux
+  link(arr_net, arr_ports, redexes, cell_types, suc, 1, dup, 2);
+}
+
+void zero_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+              int zero, int dup) {
+  int new_zero = zero_cell(arr_net, arr_ports, cell_types);
+
+  // connect zero main port to what was connected on dup 1st aux
+  link(arr_net, arr_ports, redexes, cell_types, zero, 0, arr_net[dup][1],
+       arr_ports[dup][1]);
+
+  // link new zero main port to what was connected on dup 2nd aux
+  link(arr_net, arr_ports, redexes, cell_types, zero, 0, arr_net[dup][2],
+       arr_ports[dup][2]);
+
+  delete_cell(dup, arr_net, arr_ports, cell_types);
+}
+
+void suc_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+             int suc, int era) {
+  // link era main to what was connected to suc first aux
+  link(arr_net, arr_ports, redexes, cell_types, era, 0, arr_net[suc][1],
+       arr_ports[suc][1]);
+
+  delete_cell(suc, arr_net, arr_ports, cell_types);
+}
+
+void zero_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+              int zero, int era) {
+  // deletes both
+  delete_cell(zero, arr_net, arr_ports, cell_types);
+  delete_cell(era, arr_net, arr_ports, cell_types);
+}
+
 bool should_exchange(int a, int b) { return a > b; }
 
 interaction get_interaction(int rule) {
