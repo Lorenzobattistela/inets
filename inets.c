@@ -7,24 +7,21 @@
 #define MAX_CELLS 35000
 #define MAX_PORTS 3
 
-#define SUM 0
-#define SUC 1
-#define ZERO 2
+#define SUM (1 << 0)  // 1
+#define SUC (1 << 1)  // 2
+#define ZERO (1 << 2) // 4
+#define MUL (1 << 3)  // 8
+#define DUP (1 << 4)  // 16
+#define ERA (1 << 5)  // 32
 
-#define SUC_SUM (SUM + SUC)
-#define ZERO_SUM (ZERO + SUM)
-
-typedef struct {
-  int connected_cell;
-  int connected_port;
-} Port;
-
-typedef struct {
-  int cell_id;
-  int type;
-  int num_aux_ports;
-  Port *ports;
-} Cell;
+#define SUC_SUM (SUC | SUM)   // 3
+#define ZERO_SUM (ZERO | SUM) // 5
+#define SUC_MUL (SUC | MUL)   // 10
+#define ZERO_MUL (ZERO | MUL) // 12
+#define SUC_DUP (SUC | DUP)   // 18
+#define ZERO_DUP (ZERO | DUP) // 20
+#define SUC_ERA (SUC | ERA)   // 34
+#define ZERO_ERA (ZERO | ERA) // 36
 
 typedef struct {
   int cell_id;
@@ -36,6 +33,8 @@ typedef struct {
   int capacity;
   Redex **entries;
 } Redexes;
+
+typedef void (*interaction)(int **, int **, int *, Redexes *, int, int);
 
 void init_redexes(Redexes *redexes) {
   redexes->count = 0;
@@ -61,7 +60,7 @@ void write_redex(Redexes *redexes, Redex *redex) {
 }
 
 void free_redexes(Redexes *redexes) {
-  FREE_ARRAY(Port, redexes, redexes->capacity);
+  FREE_ARRAY(Redex, redexes, redexes->capacity);
   init_redexes(redexes);
 }
 
@@ -187,7 +186,7 @@ void suc_sum(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
   interactions++;
 }
 
-void zero_sum(int **arr_net, int **arr_ports, Redexes *redexes, int *cell_types,
+void zero_sum(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
               int zero, int s) {
   int sum_aux_first_connected_cell = arr_net[s][1];
   int sum_aux_first_connected_port = arr_ports[s][1];
@@ -201,6 +200,19 @@ void zero_sum(int **arr_net, int **arr_ports, Redexes *redexes, int *cell_types,
   delete_cell(zero, arr_net, arr_ports, cell_types);
   delete_cell(s, arr_net, arr_ports, cell_types);
   interactions++;
+}
+
+bool should_exchange(int a, int b) { return a > b; }
+
+interaction get_interaction(int rule) {
+  switch (rule) {
+  case SUC_SUM:
+    return suc_sum;
+  case ZERO_SUM:
+    return zero_sum;
+  default:
+    return NULL;
+  }
 }
 
 void reduce(int *cell_types, int **arr_cell, int **arr_ports,
@@ -231,22 +243,12 @@ void reduce(int *cell_types, int **arr_cell, int **arr_ports,
     }
 
     int rule = a_type + b_type;
-    if (rule == SUC_SUM) {
-      if (a_type == SUM && b_type == SUC) {
-        suc_sum(arr_cell, arr_ports, cell_types, redexes, conn_cell_id,
-                cell_id);
-      } else {
-        suc_sum(arr_cell, arr_ports, cell_types, redexes, cell_id,
-                conn_cell_id);
-      }
-    } else if (rule == ZERO_SUM) {
-      if (a_type == SUM && b_type == ZERO) {
-        zero_sum(arr_cell, arr_ports, redexes, cell_types, conn_cell_id,
-                 cell_id);
-      } else {
-        zero_sum(arr_cell, arr_ports, redexes, cell_types, cell_id,
-                 conn_cell_id);
-      }
+    interaction itr = get_interaction(rule);
+
+    if (should_exchange(a_type, b_type)) {
+      itr(arr_cell, arr_ports, cell_types, redexes, cell_id, conn_cell_id);
+    } else {
+      itr(arr_cell, arr_ports, cell_types, redexes, conn_cell_id, cell_id);
     }
   }
 }
@@ -401,5 +403,9 @@ int main() {
   free(cell_types);
   free(arr_cells);
   free(arr_ports);
+  for (int j = 0; j < redexes->capacity; j++) {
+    free(redexes->entries[j]);
+  }
+  free(redexes);
   return 0;
 }
