@@ -352,7 +352,7 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 }
 
 int main() {
-  const char *in = "10 + 10";
+  const char *in = "10 + 10 + 10 + 10";
   ASTNode *ast = parse(in);
 
   int **arr_cells = (int **)malloc(MAX_CELLS * sizeof(int *));
