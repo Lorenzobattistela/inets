@@ -27,41 +27,59 @@ typedef struct {
 } Cell;
 
 typedef struct {
+  int cell_id;
+  int connected_cell_id;
+} Redex;
+
+typedef struct {
   int count;
   int capacity;
-  Port **entries;
+  Redex **entries;
 } Redexes;
 
-void initRedexes(Redexes *redexes) {
+void init_redexes(Redexes *redexes) {
   redexes->count = 0;
   redexes->capacity = 0;
   redexes->entries = NULL;
 }
 
-void writeRedex(Redexes *redex, Port *port) {
-  if (redex->capacity < redex->count + 1) {
-    int oldCapacity = redex->capacity;
-    redex->capacity = GROW_CAPACITY(oldCapacity);
-    redex->entries =
-        GROW_ARRAY(Port *, redex->entries, oldCapacity, redex->capacity);
+void init_redexes_with_capacity(Redexes *redexes, int capacity) {
+  redexes->count = 0;
+  redexes->capacity = capacity;
+  redexes->entries = ALLOCATE(Redex *, capacity);
+}
+
+void write_redex(Redexes *redexes, Redex *redex) {
+  if (redexes->capacity < redexes->count + 1) {
+    int oldCapacity = redexes->capacity;
+    redexes->capacity = GROW_CAPACITY(oldCapacity);
+    redexes->entries =
+        GROW_ARRAY(Redex *, redexes->entries, oldCapacity, redexes->capacity);
   }
-  redex->entries[redex->count] = port;
-  redex->count++;
+  redexes->entries[redexes->count] = redex;
+  redexes->count++;
 }
 
-void freeRedex(Redexes *redex) {
-  FREE_ARRAY(Port, redex, redex->capacity);
-  initRedexes(redex);
+void free_redexes(Redexes *redexes) {
+  FREE_ARRAY(Port, redexes, redexes->capacity);
+  init_redexes(redexes);
 }
 
-Port *pop(Redexes *redex) {
-  Port *p = redex->entries[redex->count];
-  redex->entries[redex->count] = NULL;
-  redex->count--;
-  return p;
+void print_redexes(Redexes *redexes) {
+  for (int i = 0; i < redexes->count; i++) {
+    printf("Redex at index %i\n Cell %i redex with cell %i\n", i,
+           redexes->entries[i]->cell_id,
+           redexes->entries[i]->connected_cell_id);
+  }
 }
 
-void push(Redexes *redex, Port *p) { writeRedex(redex, p); }
+Redex *pop(Redexes *redexes) {
+  Redex *r = redexes->entries[redexes->count - 1];
+  redexes->count--;
+  return r;
+}
+
+void push(Redexes *redex, Redex *r) { write_redex(redex, r); }
 
 static int cell_counter = 0;
 static int interactions = 0;
@@ -174,40 +192,45 @@ void zero_sum(int **arr_net, int **arr_ports, int *cell_types, int zero,
   interactions++;
 }
 
-void reduce(int *cell_conns, int *cell_types, int *conn_rules, int **arr_cell,
-            int **arr_ports) {
-  for (int i = 0; i < cell_counter; i++) {
-    int conn = cell_conns[i];
-    if (conn == -1)
-      continue;
+void reduce(int *cell_types, int **arr_cell, int **arr_ports,
+            Redexes *redexes) {
+  while (redexes->count > 0) {
+    Redex *r = pop(redexes);
 
-    int rule = conn_rules[i];
+    if (r == NULL) {
+      exit(EXIT_FAILURE);
+      break;
+    }
 
-    int *a_connected_cell = arr_cell[i];
-    int *a_connected_port = arr_ports[i];
-    int a_type = cell_types[i];
+    int cell_id = r->cell_id;
+    int conn_cell_id = r->connected_cell_id;
 
-    int *b_connected_cell = arr_cell[conn];
-    int *b_connected_port = arr_ports[conn];
-    int b_type = cell_types[conn];
+    int *a_connected_cell = arr_cell[cell_id];
+    int *a_connected_port = arr_ports[cell_id];
+    int a_type = cell_types[cell_id];
+
+    int *b_connected_cell = arr_cell[conn_cell_id];
+    int *b_connected_port = arr_ports[conn_cell_id];
+    int b_type = cell_types[conn_cell_id];
 
     if (a_connected_cell == NULL || a_connected_port == NULL ||
         b_connected_cell == NULL || b_connected_port == NULL ||
-        cell_types[i] == -1 || cell_types[conn] == -1) {
+        cell_types[cell_id] == -1 || cell_types[conn_cell_id] == -1) {
       continue;
     }
 
+    int rule = a_type + b_type;
     if (rule == SUC_SUM) {
       if (a_type == SUM && b_type == SUC) {
-        suc_sum(arr_cell, arr_ports, cell_types, conn, i);
+        suc_sum(arr_cell, arr_ports, cell_types, conn_cell_id, cell_id);
       } else {
-        suc_sum(arr_cell, arr_ports, cell_types, i, conn);
+        suc_sum(arr_cell, arr_ports, cell_types, cell_id, conn_cell_id);
       }
     } else if (rule == ZERO_SUM) {
       if (a_type == SUM && b_type == ZERO) {
-        zero_sum(arr_cell, arr_ports, cell_types, conn, i);
+        zero_sum(arr_cell, arr_ports, cell_types, conn_cell_id, cell_id);
       } else {
-        zero_sum(arr_cell, arr_ports, cell_types, i, conn);
+        zero_sum(arr_cell, arr_ports, cell_types, cell_id, conn_cell_id);
       }
     }
   }
@@ -314,7 +337,7 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 bool is_valid_rule(int rule) { return (rule == SUC_SUM) || (rule == ZERO_SUM); }
 
 int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns,
-                   int *cell_types, int *conn_rules) {
+                   int *cell_types, int *conn_rules, Redexes *redexes) {
   int found = 0;
   for (int i = 0; i < cell_counter; i++) {
     cell_conns[i] = -1;
@@ -355,14 +378,20 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns,
     cell_conns[i] = main_port_conn;
     conn_rules[i] = rule;
     found++;
+
+    Redex *redex = malloc(sizeof(Redex));
+    if (redex == NULL) {
+      exit(EXIT_FAILURE);
+    }
+    redex->cell_id = i;
+    redex->connected_cell_id = main_port_conn;
+    write_redex(redexes, redex);
   }
   return found;
 }
 
 int main() {
-  const char *in = "(((1 + 10) + (9 + 1)) + ((1 + 1) + (1 + 1))) + (((1 + 1) + "
-                   "(1 + 1)) + ((1 + 1) + (1 + 1))) + 1";
-
+  const char *in = "10 + 10";
   ASTNode *ast = parse(in);
 
   int **arr_cells = (int **)malloc(MAX_CELLS * sizeof(int *));
@@ -370,6 +399,8 @@ int main() {
   int *cell_types = (int *)malloc(MAX_CELLS * sizeof(int));
   int *cell_conns = (int *)malloc(MAX_CELLS * sizeof(int));
   int *conn_rules = (int *)malloc(MAX_CELLS * sizeof(int));
+  Redexes *redexes = malloc(sizeof(Redexes));
+  init_redexes_with_capacity(redexes, 16);
 
   for (int i = 0; i < MAX_CELLS; i++) {
     arr_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
@@ -389,14 +420,15 @@ int main() {
   clock_t start, end;
   double cpu_time_used;
 
-  int reductions =
-      find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules);
+  find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules,
+                 redexes);
+  print_redexes(redexes);
   start = clock();
 
-  while (reductions > 0) {
-    reduce(cell_conns, cell_types, conn_rules, arr_cells, arr_ports);
-    reductions = find_reducible(arr_cells, arr_ports, cell_conns, cell_types,
-                                conn_rules);
+  while (redexes->count > 0) {
+    reduce(cell_types, arr_cells, arr_ports, redexes);
+    find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules,
+                   redexes);
   }
   end = clock();
   cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
