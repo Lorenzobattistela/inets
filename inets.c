@@ -129,8 +129,8 @@ int create_cell(int **arr_net, int **arr_ports, int *cell_types,
   return cell_id;
 }
 
-int zero_cell(int **arr_net, int **arr_ports, int *cell_types) {
-  int cell_id = create_cell(arr_net, arr_ports, cell_types, ZERO);
+int sum_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUM);
   return cell_id;
 }
 
@@ -139,8 +139,23 @@ int suc_cell(int **arr_net, int **arr_ports, int *cell_types) {
   return cell_id;
 }
 
-int sum_cell(int **arr_net, int **arr_ports, int *cell_types) {
-  int cell_id = create_cell(arr_net, arr_ports, cell_types, SUM);
+int zero_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, ZERO);
+  return cell_id;
+}
+
+int mul_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, MUL);
+  return cell_id;
+}
+
+int dup_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, DUP);
+  return cell_id;
+}
+
+int era_cell(int **arr_net, int **arr_ports, int *cell_types) {
+  int cell_id = create_cell(arr_net, arr_ports, cell_types, ERA);
   return cell_id;
 }
 
