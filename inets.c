@@ -145,8 +145,8 @@ int sum_cell(int **arr_net, int **arr_ports, int *cell_types) {
   return cell_id;
 }
 
-void link(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port,
-          int b_id, int b_port) {
+void link(int **arr_net, int **arr_ports, Redexes *redexes, int *cell_types,
+          int a_id, int a_port, int b_id, int b_port) {
   if (a_id == -1 && b_id != -1) {
     arr_net[b_id][b_port] = -1;
     arr_ports[b_id][b_port] = -1;
@@ -158,33 +158,44 @@ void link(int **arr_net, int **arr_ports, int *cell_types, int a_id, int a_port,
     arr_ports[a_id][a_port] = b_port;
     arr_net[b_id][b_port] = a_id;
     arr_ports[b_id][b_port] = a_port;
+
+    if (a_port == 0 && arr_ports[a_id][a_port] == 0) {
+      Redex *r = malloc(sizeof(Redex));
+      if (r == NULL)
+        exit(EXIT_FAILURE);
+
+      r->cell_id = a_id;
+      r->connected_cell_id = arr_net[a_id][a_port];
+      write_redex(redexes, r);
+    }
   }
 }
 
-void suc_sum(int **arr_net, int **arr_ports, int *cell_types, int suc, int s) {
+void suc_sum(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
+             int suc, int s) {
   int new_suc = suc_cell(arr_net, arr_ports, cell_types);
 
   int suc_first_aux_cell = arr_net[suc][1];
   int suc_first_aux_ports = arr_ports[suc][1];
 
-  link(arr_net, arr_ports, cell_types, s, 0, suc_first_aux_cell,
+  link(arr_net, arr_ports, redexes, cell_types, s, 0, suc_first_aux_cell,
        suc_first_aux_ports);
-  link(arr_net, arr_ports, cell_types, new_suc, 1, arr_net[s][1],
+  link(arr_net, arr_ports, redexes, cell_types, new_suc, 1, arr_net[s][1],
        arr_ports[s][1]);
-  link(arr_net, arr_ports, cell_types, new_suc, 0, s, 1);
+  link(arr_net, arr_ports, redexes, cell_types, new_suc, 0, s, 1);
   delete_cell(suc, arr_net, arr_ports, cell_types);
   interactions++;
 }
 
-void zero_sum(int **arr_net, int **arr_ports, int *cell_types, int zero,
-              int s) {
+void zero_sum(int **arr_net, int **arr_ports, Redexes *redexes, int *cell_types,
+              int zero, int s) {
   int sum_aux_first_connected_cell = arr_net[s][1];
   int sum_aux_first_connected_port = arr_ports[s][1];
 
   int sum_aux_snd_connected_cell = arr_net[s][2];
   int sum_aux_snd_connected_port = arr_ports[s][2];
 
-  link(arr_net, arr_ports, cell_types, sum_aux_first_connected_cell,
+  link(arr_net, arr_ports, redexes, cell_types, sum_aux_first_connected_cell,
        sum_aux_first_connected_port, sum_aux_snd_connected_cell,
        sum_aux_snd_connected_port);
   delete_cell(zero, arr_net, arr_ports, cell_types);
@@ -222,15 +233,19 @@ void reduce(int *cell_types, int **arr_cell, int **arr_ports,
     int rule = a_type + b_type;
     if (rule == SUC_SUM) {
       if (a_type == SUM && b_type == SUC) {
-        suc_sum(arr_cell, arr_ports, cell_types, conn_cell_id, cell_id);
+        suc_sum(arr_cell, arr_ports, cell_types, redexes, conn_cell_id,
+                cell_id);
       } else {
-        suc_sum(arr_cell, arr_ports, cell_types, cell_id, conn_cell_id);
+        suc_sum(arr_cell, arr_ports, cell_types, redexes, cell_id,
+                conn_cell_id);
       }
     } else if (rule == ZERO_SUM) {
       if (a_type == SUM && b_type == ZERO) {
-        zero_sum(arr_cell, arr_ports, cell_types, conn_cell_id, cell_id);
+        zero_sum(arr_cell, arr_ports, redexes, cell_types, conn_cell_id,
+                 cell_id);
       } else {
-        zero_sum(arr_cell, arr_ports, cell_types, cell_id, conn_cell_id);
+        zero_sum(arr_cell, arr_ports, redexes, cell_types, cell_id,
+                 conn_cell_id);
       }
     }
   }
@@ -243,7 +258,7 @@ int church_encode(int **arr_cells, int **arr_ports, int *cell_types, int num) {
 
   for (int i = 0; i < num; i++) {
     int suc = suc_cell(arr_cells, arr_ports, cell_types);
-    link(arr_cells, arr_ports, cell_types, suc, 1, to_connect_cell,
+    link(arr_cells, arr_ports, NULL, cell_types, suc, 1, to_connect_cell,
          to_connect_port);
     to_connect_cell = suc;
     to_connect_port = 0;
@@ -280,18 +295,18 @@ int church_decode(int **arr_cells, int **arr_ports, int *cell_types) {
 }
 
 int to_interaction_net(ASTNode *node, int **arr_cells, int **arr_ports,
-                       int *cell_types) {
+                       int *cell_types, Redexes *redexes) {
   if (node == NULL)
     return -1;
 
   if (node->token == DIGIT) {
     return church_encode(arr_cells, arr_ports, cell_types, node->value);
   } else if (node->token == PLUS) {
-    int left_cell_id =
-        to_interaction_net(node->left, arr_cells, arr_ports, cell_types);
+    int left_cell_id = to_interaction_net(node->left, arr_cells, arr_ports,
+                                          cell_types, redexes);
     int left_port = 0;
-    int right_cell_id =
-        to_interaction_net(node->right, arr_cells, arr_ports, cell_types);
+    int right_cell_id = to_interaction_net(node->right, arr_cells, arr_ports,
+                                           cell_types, redexes);
     int right_port = 0;
 
     if (cell_types[left_cell_id] == SUM) {
@@ -303,8 +318,10 @@ int to_interaction_net(ASTNode *node, int **arr_cells, int **arr_ports,
 
     int sum = sum_cell(arr_cells, arr_ports, cell_types);
     // linking here
-    link(arr_cells, arr_ports, cell_types, sum, 0, left_cell_id, left_port);
-    link(arr_cells, arr_ports, cell_types, sum, 1, right_cell_id, right_port);
+    link(arr_cells, arr_ports, redexes, cell_types, sum, 0, left_cell_id,
+         left_port);
+    link(arr_cells, arr_ports, redexes, cell_types, sum, 1, right_cell_id,
+         right_port);
     return sum;
   }
   return -1;
@@ -334,57 +351,6 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
   }
 }
 
-bool is_valid_rule(int rule) { return (rule == SUC_SUM) || (rule == ZERO_SUM); }
-
-int find_reducible(int **arr_cells, int **arr_ports, int *cell_types,
-                   Redexes *redexes) {
-  int found = 0;
-  for (int i = 0; i < cell_counter; i++) {
-    int *main_port = arr_cells[i];
-    if (main_port == NULL) {
-      continue;
-    }
-    int main_port_conn = main_port[0];
-    if (main_port_conn == -1) {
-      continue;
-    }
-
-    int *connection_port = arr_cells[main_port_conn];
-    if (connection_port == NULL) {
-      continue;
-    }
-    int connection_main = connection_port[0];
-
-    if (cell_types[i] == -1 || cell_types[main_port_conn] == -1) {
-      continue;
-    }
-
-    int rule = cell_types[i] + cell_types[main_port_conn];
-
-    if (!is_valid_rule(rule)) {
-      continue;
-    }
-
-    if (connection_main != i) {
-      continue;
-    }
-
-    if (i > main_port_conn) {
-      continue;
-    }
-
-    Redex *redex = malloc(sizeof(Redex));
-    if (redex == NULL) {
-      exit(EXIT_FAILURE);
-    }
-    redex->cell_id = i;
-    redex->connected_cell_id = main_port_conn;
-    write_redex(redexes, redex);
-    found++;
-  }
-  return found;
-}
-
 int main() {
   const char *in = "10 + 10";
   ASTNode *ast = parse(in);
@@ -405,19 +371,16 @@ int main() {
     }
   }
   // print_ast(ast);
-  to_interaction_net(ast, arr_cells, arr_ports, cell_types);
+  to_interaction_net(ast, arr_cells, arr_ports, cell_types, redexes);
   interactions = 0;
 
   clock_t start, end;
   double cpu_time_used;
 
-  find_reducible(arr_cells, arr_ports, cell_types, redexes);
-  print_redexes(redexes);
   start = clock();
 
   while (redexes->count > 0) {
     reduce(cell_types, arr_cells, arr_ports, redexes);
-    find_reducible(arr_cells, arr_ports, cell_types, redexes);
   }
   end = clock();
   cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
