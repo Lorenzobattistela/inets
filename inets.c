@@ -336,13 +336,10 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 
 bool is_valid_rule(int rule) { return (rule == SUC_SUM) || (rule == ZERO_SUM); }
 
-int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns,
-                   int *cell_types, int *conn_rules, Redexes *redexes) {
+int find_reducible(int **arr_cells, int **arr_ports, int *cell_types,
+                   Redexes *redexes) {
   int found = 0;
   for (int i = 0; i < cell_counter; i++) {
-    cell_conns[i] = -1;
-    conn_rules[i] = -1;
-
     int *main_port = arr_cells[i];
     if (main_port == NULL) {
       continue;
@@ -375,9 +372,6 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns,
     if (i > main_port_conn) {
       continue;
     }
-    cell_conns[i] = main_port_conn;
-    conn_rules[i] = rule;
-    found++;
 
     Redex *redex = malloc(sizeof(Redex));
     if (redex == NULL) {
@@ -386,6 +380,7 @@ int find_reducible(int **arr_cells, int **arr_ports, int *cell_conns,
     redex->cell_id = i;
     redex->connected_cell_id = main_port_conn;
     write_redex(redexes, redex);
+    found++;
   }
   return found;
 }
@@ -397,8 +392,6 @@ int main() {
   int **arr_cells = (int **)malloc(MAX_CELLS * sizeof(int *));
   int **arr_ports = (int **)malloc(MAX_CELLS * sizeof(int *));
   int *cell_types = (int *)malloc(MAX_CELLS * sizeof(int));
-  int *cell_conns = (int *)malloc(MAX_CELLS * sizeof(int));
-  int *conn_rules = (int *)malloc(MAX_CELLS * sizeof(int));
   Redexes *redexes = malloc(sizeof(Redexes));
   init_redexes_with_capacity(redexes, 16);
 
@@ -406,8 +399,6 @@ int main() {
     arr_cells[i] = (int *)malloc(MAX_PORTS * sizeof(int));
     arr_ports[i] = (int *)malloc(MAX_PORTS * sizeof(int));
     cell_types[i] = -1;
-    cell_conns[i] = -1;
-    conn_rules[i] = -1;
     for (int j = 0; j < MAX_PORTS; j++) {
       arr_cells[i][j] = -1;
       arr_ports[i][j] = -1;
@@ -420,15 +411,13 @@ int main() {
   clock_t start, end;
   double cpu_time_used;
 
-  find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules,
-                 redexes);
+  find_reducible(arr_cells, arr_ports, cell_types, redexes);
   print_redexes(redexes);
   start = clock();
 
   while (redexes->count > 0) {
     reduce(cell_types, arr_cells, arr_ports, redexes);
-    find_reducible(arr_cells, arr_ports, cell_conns, cell_types, conn_rules,
-                   redexes);
+    find_reducible(arr_cells, arr_ports, cell_types, redexes);
   }
   end = clock();
   cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
@@ -446,8 +435,6 @@ int main() {
     free(arr_cells[i]);
     free(arr_ports[i]);
   }
-  free(cell_conns);
-  free(conn_rules);
   free(cell_types);
   free(arr_cells);
   free(arr_ports);
