@@ -323,6 +323,18 @@ interaction get_interaction(int rule) {
     return suc_sum;
   case ZERO_SUM:
     return zero_sum;
+  case SUC_MUL:
+    return suc_mul;
+  case ZERO_MUL:
+    return zero_mul;
+  case SUC_DUP:
+    return suc_dup;
+  case ZERO_DUP:
+    return zero_dup;
+  case SUC_ERA:
+    return suc_era;
+  case ZERO_ERA:
+    return zero_era;
   default:
     return NULL;
   }
