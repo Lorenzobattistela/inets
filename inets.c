@@ -36,6 +36,8 @@ typedef struct {
 
 typedef void (*interaction)(int **, int **, int *, Redexes *, int, int);
 
+void print_net(int **arr_cells, int **arr_ports, int *cell_types);
+
 void init_redexes(Redexes *redexes) {
   redexes->count = 0;
   redexes->capacity = 0;
@@ -93,6 +95,15 @@ void print_cell_type(int type) {
     break;
   case SUC:
     printf("SUC");
+    break;
+  case MUL:
+    printf("MUL");
+    break;
+  case ERA:
+    printf("ERA");
+    break;
+  case DUP:
+    printf("DUP");
     break;
   default:
     printf("Invalid cell type\n");
@@ -220,6 +231,7 @@ void zero_sum(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
 void suc_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
              int suc, int mul) {
 
+  printf("Im on suc_MUl!\n");
   int sum_c = sum_cell(arr_net, arr_ports, cell_types);
   int dup = dup_cell(arr_net, arr_ports, cell_types);
 
@@ -245,6 +257,7 @@ void suc_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
   link(arr_net, arr_ports, redexes, cell_types, sum_c, 1, dup, 1);
 
   delete_cell(suc, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 void zero_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
@@ -258,6 +271,7 @@ void zero_mul(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
   link(arr_net, arr_ports, redexes, cell_types, zero, 0, mul, 2);
 
   delete_cell(mul, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 void suc_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
@@ -282,6 +296,7 @@ void suc_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
 
   // link new suc first aux to dup 2nd aux
   link(arr_net, arr_ports, redexes, cell_types, suc, 1, dup, 2);
+  interactions++;
 }
 
 void zero_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
@@ -293,10 +308,11 @@ void zero_dup(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
        arr_ports[dup][1]);
 
   // link new zero main port to what was connected on dup 2nd aux
-  link(arr_net, arr_ports, redexes, cell_types, zero, 0, arr_net[dup][2],
+  link(arr_net, arr_ports, redexes, cell_types, new_zero, 0, arr_net[dup][2],
        arr_ports[dup][2]);
 
   delete_cell(dup, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 void suc_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
@@ -306,6 +322,7 @@ void suc_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
        arr_ports[suc][1]);
 
   delete_cell(suc, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 void zero_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
@@ -313,6 +330,7 @@ void zero_era(int **arr_net, int **arr_ports, int *cell_types, Redexes *redexes,
   // deletes both
   delete_cell(zero, arr_net, arr_ports, cell_types);
   delete_cell(era, arr_net, arr_ports, cell_types);
+  interactions++;
 }
 
 bool should_exchange(int a, int b) { return a > b; }
@@ -368,12 +386,19 @@ void reduce(int *cell_types, int **arr_cell, int **arr_ports,
     }
 
     int rule = a_type + b_type;
+    printf("Cell id (a) is: %i\n", cell_id);
+    printf("A cell type:   ");
+    print_cell_type(a_type);
+    printf("Cell id (b) is: %i\n", conn_cell_id);
+    printf("B cell type:   ");
+    print_cell_type(b_type);
+
     interaction itr = get_interaction(rule);
 
     if (should_exchange(a_type, b_type)) {
-      itr(arr_cell, arr_ports, cell_types, redexes, cell_id, conn_cell_id);
-    } else {
       itr(arr_cell, arr_ports, cell_types, redexes, conn_cell_id, cell_id);
+    } else {
+      itr(arr_cell, arr_ports, cell_types, redexes, cell_id, conn_cell_id);
     }
   }
 }
@@ -450,6 +475,28 @@ int to_interaction_net(ASTNode *node, int **arr_cells, int **arr_ports,
     link(arr_cells, arr_ports, redexes, cell_types, sum, 1, right_cell_id,
          right_port);
     return sum;
+  } else if (node->token == MULTIPLICATION) {
+    int left_cell_id = to_interaction_net(node->left, arr_cells, arr_ports,
+                                          cell_types, redexes);
+    int left_port = 0;
+    int right_cell_id = to_interaction_net(node->right, arr_cells, arr_ports,
+                                           cell_types, redexes);
+    int right_port = 0;
+
+    if (cell_types[left_cell_id] == MUL) {
+      left_port = 2;
+    }
+    if (cell_types[right_cell_id] == MUL) {
+      right_port = 2;
+    }
+
+    int mul = mul_cell(arr_cells, arr_ports, cell_types);
+    // linking here
+    link(arr_cells, arr_ports, redexes, cell_types, mul, 0, left_cell_id,
+         left_port);
+    link(arr_cells, arr_ports, redexes, cell_types, mul, 1, right_cell_id,
+         right_port);
+    return mul;
   }
   return -1;
 }
@@ -479,8 +526,9 @@ void print_net(int **arr_cells, int **arr_ports, int *cell_types) {
 }
 
 int main() {
-  const char *in = "10 + 10 + 10 + 10";
+  const char *in = "2 * 1";
   ASTNode *ast = parse(in);
+  // print_ast(ast);
 
   int **arr_cells = (int **)malloc(MAX_CELLS * sizeof(int *));
   int **arr_ports = (int **)malloc(MAX_CELLS * sizeof(int *));
@@ -497,7 +545,6 @@ int main() {
       arr_ports[i][j] = -1;
     }
   }
-  // print_ast(ast);
   to_interaction_net(ast, arr_cells, arr_ports, cell_types, redexes);
   interactions = 0;
 

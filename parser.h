@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum { L_PAREN, R_PAREN, DIGIT, PLUS, END } Token;
+typedef enum { L_PAREN, R_PAREN, DIGIT, PLUS, END, MULTIPLICATION } Token;
 
 typedef struct {
   Token token;

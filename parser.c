@@ -16,6 +16,10 @@ TokenInfo get_next_token(const char **input) {
     (*input)++;
     return (TokenInfo){R_PAREN, 0};
   }
+  if (**input == '*') {
+    (*input)++;
+    return (TokenInfo){MULTIPLICATION, 0};
+  }
   if (**input == '+') {
     (*input)++;
     return (TokenInfo){PLUS, 0};
@@ -74,7 +78,7 @@ ASTNode *parse_term(const char **input) {
 
 ASTNode *parse_expression(const char **input) {
   ASTNode *node = parse_term(input);
-  while (current_token.token == PLUS) {
+  while (current_token.token == PLUS || current_token.token == MULTIPLICATION) {
     Token op = current_token.token;
     advance(input);
     ASTNode *right = parse_term(input);
@@ -93,6 +97,12 @@ void print_ast(ASTNode *node) {
     return;
   if (node->token == DIGIT) {
     printf("%d", node->value);
+  } else if (node->token == MULTIPLICATION) {
+    printf("(");
+    print_ast(node->left);
+    printf(" * ");
+    print_ast(node->right);
+    printf(")");
   } else if (node->token == PLUS) {
     printf("(");
     print_ast(node->left);
